@@ -1,0 +1,42 @@
+# GADS Agent Configuration
+# Defines settings for each AI agent
+
+architect:
+  name: "architect"
+  provider: "anthropic"
+  model: "claude-opus-4-5-20251101"
+  temperature: 0.7
+  max_tokens: 4096
+  system_prompt_path: "prompts/architect.md"
+
+designer:
+  name: "designer"
+  provider: "ollama"
+  model: "llama3.1:8b"
+  temperature: 0.7
+  max_tokens: 4096
+  system_prompt_path: "prompts/designer.md"
+
+developer:
+  name: "developer"
+  provider: "ollama"
+  model: "llama3.1:8b"
+  temperature: 0.3
+  max_tokens: 8192
+  system_prompt_path: "prompts/developer.md"
+
+art_director:
+  name: "art_director"
+  provider: "anthropic"
+  model: "claude-opus-4-5-20251101"
+  temperature: 0.8
+  max_tokens: 4096
+  system_prompt_path: "prompts/art_director.md"
+
+qa:
+  name: "qa"
+  provider: "ollama"
+  model: "llama3.1:8b"
+  temperature: 0.2
+  max_tokens: 4096
+  system_prompt_path: "prompts/qa.md"
