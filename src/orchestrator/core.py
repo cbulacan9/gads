@@ -46,7 +46,10 @@ class Orchestrator:
         self.approval_callback = approval_callback or self._default_approval
         
         # Initialize components
-        self.session_manager = SessionManager(self.settings.session_dir)
+        self.session_manager = SessionManager(
+            self.settings.session_dir,
+            max_history=self.settings.max_session_history,
+        )
         self.factory = self._create_factory()
         self.agents = self.factory.create_all_agents()
         self.router = self._create_router()
