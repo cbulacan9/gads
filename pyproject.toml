@@ -45,19 +45,17 @@ dev = [
 ]
 
 [project.scripts]
-gads = "cli:main"
+gads = "gads.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agents", "src/orchestrator", "src/tools", "src/utils"]
-only-include = ["src"]
-sources = ["src"]
+packages = ["src/gads"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src"]
+include = ["src/gads"]
 
 [tool.black]
 line-length = 100
