@@ -15,7 +15,8 @@ from .base import AgentConfig, BaseAgent, ModelProvider
 from .architect import ArchitectAgent
 from .art_director import ArtDirectorAgent
 from .designer import DesignerAgent
-from .developer import DeveloperAgent
+from .developer_2d import Developer2DAgent
+from .developer_3d import Developer3DAgent
 from .qa import QAAgent
 
 
@@ -24,7 +25,8 @@ AGENT_CLASSES: dict[str, type[BaseAgent]] = {
     "architect": ArchitectAgent,
     "art_director": ArtDirectorAgent,
     "designer": DesignerAgent,
-    "developer": DeveloperAgent,
+    "developer_2d": Developer2DAgent,
+    "developer_3d": Developer3DAgent,
     "qa": QAAgent,
 }
 

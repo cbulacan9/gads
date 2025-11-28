@@ -57,9 +57,9 @@ class TestAgentResponse:
         """Test response with artifacts."""
         response = AgentResponse(
             content="Response with code",
-            agent_name="developer",
+            agent_name="developer_2d",
             model="llama3.1:8b",
-            artifacts={"gdscript_blocks": ["extends Node"]},
+            artifacts={"gdscript_blocks": ["extends Node2D"]},
         )
         
         assert "gdscript_blocks" in response.artifacts

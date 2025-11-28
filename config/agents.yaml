@@ -17,13 +17,21 @@ designer:
   max_tokens: 4096
   system_prompt_path: "prompts/designer.md"
 
-developer:
-  name: "developer"
+developer_2d:
+  name: "developer_2d"
   provider: "ollama"
   model: "llama3.1:8b"
   temperature: 0.3
   max_tokens: 8192
-  system_prompt_path: "prompts/developer.md"
+  system_prompt_path: "prompts/developer_2d.md"
+
+developer_3d:
+  name: "developer_3d"
+  provider: "ollama"
+  model: "llama3.1:8b"
+  temperature: 0.3
+  max_tokens: 8192
+  system_prompt_path: "prompts/developer_3d.md"
 
 art_director:
   name: "art_director"
