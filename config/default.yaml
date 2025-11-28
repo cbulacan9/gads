@@ -18,6 +18,11 @@ godot:
   version: "4.2"
   projects_dir: "./projects"
 
+# Ollama settings
+ollama:
+  host: "http://localhost:11434"
+  model: "qwen2.5-coder:14b"  # Default model for local inference
+
 # Logging settings
 logging:
   level: "INFO"

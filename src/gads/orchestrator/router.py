@@ -171,14 +171,14 @@ class AgentRouter:
     def __init__(
         self,
         ollama_base_url: str = "http://localhost:11434",
-        classifier_model: str = "llama3.1:8b",
+        classifier_model: str = "qwen2.5-coder:14b",
     ):
         """
         Initialize the router.
         
         Args:
             ollama_base_url: Base URL for Ollama API
-            classifier_model: Model to use for classification
+            classifier_model: Model to use for classification (default: qwen2.5-coder:14b)
         """
         self.ollama_base_url = ollama_base_url
         self.classifier_model = classifier_model
@@ -354,7 +354,36 @@ Task type:"""
         if any(kw in input_lower for kw in ["balance", "difficulty", "tuning"]):
             return TaskType.BALANCING
         
-        # Development keywords
+        # Check explicit 3D/2D keywords BEFORE general development keywords
+        # This ensures "CharacterBody3D script" routes to 3D, not 2D
+        
+        # Explicit 3D keywords override project type
+        if any(kw in input_lower for kw in ["3d", "mesh", "camera3d", "characterbody3d"]):
+            if any(kw in input_lower for kw in ["implement", "code", "feature"]):
+                return TaskType.IMPLEMENT_FEATURE_3D
+            if any(kw in input_lower for kw in ["scene", "node"]):
+                return TaskType.CREATE_SCENE_3D
+            if any(kw in input_lower for kw in ["script", "gdscript"]):
+                return TaskType.WRITE_SCRIPT_3D
+            if any(kw in input_lower for kw in ["bug", "fix", "debug"]):
+                return TaskType.DEBUG_3D
+            # Default to implement for 3D context
+            return TaskType.IMPLEMENT_FEATURE_3D
+        
+        # Explicit 2D keywords
+        if any(kw in input_lower for kw in ["2d", "sprite", "camera2d", "characterbody2d", "tilemap"]):
+            if any(kw in input_lower for kw in ["implement", "code", "feature"]):
+                return TaskType.IMPLEMENT_FEATURE_2D
+            if any(kw in input_lower for kw in ["scene", "node"]):
+                return TaskType.CREATE_SCENE_2D
+            if any(kw in input_lower for kw in ["script", "gdscript"]):
+                return TaskType.WRITE_SCRIPT_2D
+            if any(kw in input_lower for kw in ["bug", "fix", "debug"]):
+                return TaskType.DEBUG_2D
+            # Default to implement for 2D context
+            return TaskType.IMPLEMENT_FEATURE_2D
+        
+        # General development keywords (use project type as default)
         if any(kw in input_lower for kw in ["implement", "code", "create feature", "add feature"]):
             return TaskType.IMPLEMENT_FEATURE_3D if is_3d else TaskType.IMPLEMENT_FEATURE_2D
         if any(kw in input_lower for kw in ["scene", "node"]):
@@ -363,28 +392,6 @@ Task type:"""
             return TaskType.WRITE_SCRIPT_3D if is_3d else TaskType.WRITE_SCRIPT_2D
         if any(kw in input_lower for kw in ["bug", "fix", "debug", "error"]):
             return TaskType.DEBUG_3D if is_3d else TaskType.DEBUG_2D
-        
-        # Explicit 3D keywords override project type
-        if any(kw in input_lower for kw in ["3d", "mesh", "camera3d", "characterbody3d"]):
-            if any(kw in input_lower for kw in ["implement", "code", "feature"]):
-                return TaskType.IMPLEMENT_FEATURE_3D
-            if any(kw in input_lower for kw in ["scene", "node"]):
-                return TaskType.CREATE_SCENE_3D
-            if any(kw in input_lower for kw in ["script"]):
-                return TaskType.WRITE_SCRIPT_3D
-            if any(kw in input_lower for kw in ["bug", "fix", "debug"]):
-                return TaskType.DEBUG_3D
-        
-        # Explicit 2D keywords
-        if any(kw in input_lower for kw in ["2d", "sprite", "camera2d", "characterbody2d", "tilemap"]):
-            if any(kw in input_lower for kw in ["implement", "code", "feature"]):
-                return TaskType.IMPLEMENT_FEATURE_2D
-            if any(kw in input_lower for kw in ["scene", "node"]):
-                return TaskType.CREATE_SCENE_2D
-            if any(kw in input_lower for kw in ["script"]):
-                return TaskType.WRITE_SCRIPT_2D
-            if any(kw in input_lower for kw in ["bug", "fix", "debug"]):
-                return TaskType.DEBUG_2D
         
         # Art keywords
         if any(kw in input_lower for kw in ["visual", "style", "art direction", "look and feel"]):

@@ -22,12 +22,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     
-    # Anthropic
+    # Anthropic (for Architect and Art Director)
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
     
-    # Ollama
+    # Ollama (for Designer, Developers, QA, and Router)
     ollama_host: str = Field(default="http://localhost:11434", description="Ollama API URL")
-    ollama_model: str = Field(default="llama3.1:8b", description="Default Ollama model")
+    ollama_model: str = Field(default="qwen2.5-coder:14b", description="Default Ollama model")
     
     # Stable Diffusion
     sd_api_url: str = Field(default="http://localhost:7860", description="SD A1111 API URL")

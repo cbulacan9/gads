@@ -20,42 +20,42 @@ SAMPLE_AGENTS_CONFIG = """
 architect:
   name: "architect"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.7
   max_tokens: 4096
 
 designer:
   name: "designer"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.7
   max_tokens: 4096
 
 developer_2d:
   name: "developer_2d"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.3
   max_tokens: 8192
 
 developer_3d:
   name: "developer_3d"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.3
   max_tokens: 8192
 
 art_director:
   name: "art_director"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.8
   max_tokens: 4096
 
 qa:
   name: "qa"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.2
   max_tokens: 4096
 """
@@ -248,17 +248,19 @@ class TestOrchestratorRun:
             model="llama3.1:8b",
         )
         
+        # Create mocks
+        mock_classify = AsyncMock(return_value=TaskType.GAME_CONCEPT)
+        mock_execute = AsyncMock(return_value=mock_response)
+        
         # Mock the router's classify_request to return a specific task type
         with patch.object(
             orchestrator.router,
             "classify_request",
-            new_callable=AsyncMock,
-            return_value=TaskType.GAME_CONCEPT,
+            mock_classify,
         ), patch.object(
             orchestrator.agents["architect"],
             "execute",
-            new_callable=AsyncMock,
-            return_value=mock_response,
+            mock_execute,
         ):
             response = await orchestrator.run(
                 "I want to make a game about space",
@@ -266,7 +268,7 @@ class TestOrchestratorRun:
             )
         
         assert response.agent_name == "architect"
-        orchestrator.router.classify_request.assert_called_once()
+        mock_classify.assert_called_once()
 
 
 class TestOrchestratorPipeline:

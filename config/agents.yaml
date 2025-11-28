@@ -1,5 +1,11 @@
 # GADS Agent Configuration
 # Defines settings for each AI agent
+#
+# Model Strategy:
+#   - Claude Opus 4.5 (API): High-level creative/architectural tasks
+#   - Qwen2.5-Coder 14B (Local): Code generation, mechanics, QA
+#
+# This hybrid approach balances quality, cost, and speed.
 
 architect:
   name: "architect"
@@ -12,7 +18,7 @@ architect:
 designer:
   name: "designer"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.7
   max_tokens: 4096
   system_prompt_path: "prompts/designer.md"
@@ -20,7 +26,7 @@ designer:
 developer_2d:
   name: "developer_2d"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.3
   max_tokens: 8192
   system_prompt_path: "prompts/developer_2d.md"
@@ -28,7 +34,7 @@ developer_2d:
 developer_3d:
   name: "developer_3d"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.3
   max_tokens: 8192
   system_prompt_path: "prompts/developer_3d.md"
@@ -44,7 +50,7 @@ art_director:
 qa:
   name: "qa"
   provider: "ollama"
-  model: "llama3.1:8b"
+  model: "qwen2.5-coder:14b"
   temperature: 0.2
   max_tokens: 4096
   system_prompt_path: "prompts/qa.md"

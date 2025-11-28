@@ -18,6 +18,7 @@ from rich.prompt import Confirm
 
 from .orchestrator import Orchestrator, TaskType, RoutingDecision
 from .utils import load_settings, setup_logging, get_logger
+from .tools import GodotTool, StableDiffusionTool, BlenderMCPTool
 
 app = typer.Typer(
     name="gads",
@@ -340,6 +341,149 @@ def agents() -> None:
     
     console.print(table)
     console.print(f"\n[dim]Use [bold]gads iterate -a <agent> \"instruction\"[/] to use a specific agent[/]")
+
+
+@app.command()
+def check() -> None:
+    """Check connectivity to all external services (Ollama, SD, Blender)."""
+    import aiohttp
+    
+    settings = load_settings()
+    
+    console.print("\n[bold]GADS Service Health Check[/]\n")
+    
+    async def check_ollama() -> tuple[bool, str, list[str]]:
+        """Check Ollama connectivity."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{settings.ollama_host}/api/tags",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status != 200:
+                        return False, f"API returned status {resp.status}", []
+                    
+                    data = await resp.json()
+                    models = [m["name"] for m in data.get("models", [])]
+                    
+                    if not models:
+                        return False, "No models installed. Run: ollama pull llama3.2:3b", []
+                    
+                    return True, f"Running with {len(models)} model(s)", models
+        except asyncio.TimeoutError:
+            return False, "Connection timeout. Is Ollama running?", []
+        except aiohttp.ClientConnectorError:
+            return False, "Cannot connect. Try: ollama serve", []
+        except Exception as e:
+            return False, f"Error: {e}", []
+    
+    async def check_sd() -> tuple[bool, str]:
+        """Check Stable Diffusion connectivity."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{settings.sd_api_url}/sdapi/v1/sd-models",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return True, f"Running with {len(data)} model(s)"
+                    return False, f"API returned status {resp.status}"
+        except asyncio.TimeoutError:
+            return False, "Connection timeout"
+        except aiohttp.ClientConnectorError:
+            return False, "Cannot connect (optional)"
+        except Exception as e:
+            return False, f"Error: {e}"
+    
+    async def check_blender() -> tuple[bool, str]:
+        """Check Blender MCP connectivity."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"http://{settings.blender_mcp_host}:{settings.blender_mcp_port}/health",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        return True, "Running"
+                    return False, f"API returned status {resp.status}"
+        except asyncio.TimeoutError:
+            return False, "Connection timeout"
+        except aiohttp.ClientConnectorError:
+            return False, "Cannot connect (optional)"
+        except Exception as e:
+            return False, f"Error: {e}"
+    
+    async def run_checks():
+        """Run all health checks."""
+        ollama_ok, ollama_msg, ollama_models = await check_ollama()
+        sd_ok, sd_msg = await check_sd()
+        blender_ok, blender_msg = await check_blender()
+        return (
+            (ollama_ok, ollama_msg, ollama_models),
+            (sd_ok, sd_msg),
+            (blender_ok, blender_msg),
+        )
+    
+    # Run checks
+    with console.status("[bold cyan]Checking services...[/]", spinner="dots"):
+        ollama_result, sd_result, blender_result = asyncio.run(run_checks())
+    
+    # Display results
+    table = Table(show_header=True)
+    table.add_column("Service", style="bold")
+    table.add_column("Status")
+    table.add_column("Details")
+    table.add_column("Required")
+    
+    # Ollama (required)
+    ollama_ok, ollama_msg, ollama_models = ollama_result
+    status_icon = "[green]✓[/]" if ollama_ok else "[red]✗[/]"
+    models_str = ", ".join(ollama_models[:3]) if ollama_models else "-"
+    if len(ollama_models) > 3:
+        models_str += f" (+{len(ollama_models) - 3})"
+    table.add_row(
+        "Ollama",
+        f"{status_icon} {ollama_msg}",
+        models_str,
+        "[red]Yes[/]",
+    )
+    
+    # Stable Diffusion (optional)
+    sd_ok, sd_msg = sd_result
+    status_icon = "[green]✓[/]" if sd_ok else "[yellow]○[/]"
+    table.add_row(
+        "Stable Diffusion",
+        f"{status_icon} {sd_msg}",
+        "-",
+        "[dim]No[/]",
+    )
+    
+    # Blender MCP (optional)
+    blender_ok, blender_msg = blender_result
+    status_icon = "[green]✓[/]" if blender_ok else "[yellow]○[/]"
+    table.add_row(
+        "Blender MCP",
+        f"{status_icon} {blender_msg}",
+        "-",
+        "[dim]No[/]",
+    )
+    
+    console.print(table)
+    
+    # Summary
+    if ollama_ok:
+        console.print("\n[green]✓ Ready to run GADS[/]")
+        console.print("\n[dim]Run end-to-end tests with:[/]")
+        console.print("  pytest tests/test_e2e_ollama.py -v --run-e2e")
+    else:
+        console.print("\n[red]✗ Ollama is required but not available[/]")
+        console.print("\n[dim]To start Ollama:[/]")
+        console.print("  1. Install from https://ollama.ai")
+        console.print("  2. Run: [bold]ollama serve[/]")
+        console.print("  3. Pull a model: [bold]ollama pull llama3.2:3b[/]")
+        console.print("     (or any other model you prefer)")
+        raise typer.Exit(1)
 
 
 def _show_artifacts(artifacts: dict) -> None:
