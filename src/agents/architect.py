@@ -103,7 +103,6 @@ Be specific about node types, signal patterns, and resource usage.
             agent_name=self.name,
             model=self.config.model,
             artifacts=artifacts,
-            suggested_next_agent=self._suggest_next_agent(response_text),
         )
     
     def _build_project_context(self, context: dict[str, Any]) -> str:
@@ -145,16 +144,3 @@ Be specific about node types, signal patterns, and resource usage.
             artifacts["has_game_concept"] = True
         
         return artifacts
-    
-    def _suggest_next_agent(self, response: str) -> str | None:
-        """Suggest which agent should handle the next step."""
-        response_lower = response.lower()
-        
-        if any(kw in response_lower for kw in ["implement", "code this", "create script"]):
-            return "developer"
-        if any(kw in response_lower for kw in ["visual style", "art direction", "aesthetic"]):
-            return "art_director"
-        if any(kw in response_lower for kw in ["mechanic details", "balance", "gameplay"]):
-            return "designer"
-        
-        return None

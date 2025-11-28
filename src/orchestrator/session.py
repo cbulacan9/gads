@@ -7,12 +7,16 @@ Handles conversation history, project state, and persistence.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+logger = logging.getLogger(__name__)
 
 
 class Message(BaseModel):
@@ -60,6 +64,9 @@ class Session(BaseModel):
     project: ProjectState
     history: list[Message] = Field(default_factory=list)
     
+    # Track how many messages have been truncated
+    truncated_message_count: int = 0
+    
     # Agent-specific memory/context
     agent_contexts: dict[str, dict[str, Any]] = Field(default_factory=dict)
     
@@ -90,14 +97,41 @@ class Session(BaseModel):
         if agent_name not in self.agent_contexts:
             self.agent_contexts[agent_name] = {}
         return self.agent_contexts[agent_name]
+    
+    def truncate_history(self, max_messages: int) -> int:
+        """
+        Truncate history to keep only the most recent messages.
+        
+        Args:
+            max_messages: Maximum number of messages to retain
+            
+        Returns:
+            Number of messages removed
+        """
+        if len(self.history) <= max_messages:
+            return 0
+        
+        remove_count = len(self.history) - max_messages
+        self.history = self.history[-max_messages:]
+        self.truncated_message_count += remove_count
+        
+        return remove_count
 
 
 class SessionManager:
     """Manages session persistence and retrieval."""
     
-    def __init__(self, session_dir: Path):
+    def __init__(self, session_dir: Path, max_history: int = 100):
+        """
+        Initialize the session manager.
+        
+        Args:
+            session_dir: Directory for storing session files
+            max_history: Maximum messages to retain in history (default 100)
+        """
         self.session_dir = Path(session_dir)
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.max_history = max_history
         self._current_session: Session | None = None
     
     @property
@@ -127,10 +161,25 @@ class SessionManager:
         return session
     
     def save(self, session: Session | None = None) -> None:
-        """Save a session to disk."""
+        """
+        Save a session to disk.
+        
+        Automatically truncates history if it exceeds max_history,
+        logging a warning when truncation occurs.
+        """
         session = session or self._current_session
         if not session:
             raise ValueError("No session to save")
+        
+        # Truncate history if needed
+        removed = session.truncate_history(self.max_history)
+        if removed > 0:
+            logger.warning(
+                f"Session {session.id}: Truncated {removed} old messages. "
+                f"Total truncated: {session.truncated_message_count}. "
+                f"Consider increasing max_session_history or implementing "
+                f"a different persistence strategy for long-running sessions."
+            )
         
         path = self.session_dir / f"{session.id}.json"
         with open(path, "w") as f:
@@ -147,5 +196,7 @@ class SessionManager:
                 "project_name": data["project"]["name"],
                 "created_at": data["created_at"],
                 "updated_at": data["updated_at"],
+                "message_count": len(data.get("history", [])),
+                "truncated_count": data.get("truncated_message_count", 0),
             })
         return sorted(sessions, key=lambda x: x["updated_at"], reverse=True)
