@@ -1,0 +1,25 @@
+# GADS Default Configuration
+
+# Application settings
+app:
+  name: "GADS"
+  version: "0.2.0"
+  debug: false
+
+# Session settings
+session:
+  dir: "./sessions"
+  max_history: 100
+  auto_save: true
+
+# Godot settings
+godot:
+  executable: "godot"
+  version: "4.2"
+  projects_dir: "./projects"
+
+# Logging settings
+logging:
+  level: "INFO"
+  file: "logs/gads.log"
+  format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
