@@ -24,6 +24,9 @@ class Orchestrator:
     
     Ties together agent creation, session management, request routing,
     and pipeline execution into a cohesive interface.
+    
+    For multi-agent workflows, use run_pipeline() with explicit Pipeline
+    definitions rather than implicit chaining.
     """
     
     def __init__(
@@ -91,7 +94,10 @@ class Orchestrator:
     
     def _create_router(self) -> AgentRouter:
         """Create and configure the agent router."""
-        router = AgentRouter()
+        router = AgentRouter(
+            ollama_base_url=self.settings.ollama_host,
+            classifier_model=self.settings.ollama_model,
+        )
         router.register_agents(self.agents)
         return router
     
@@ -126,7 +132,6 @@ class Orchestrator:
         self,
         name: str,
         description: str = "",
-        run_architect: bool = True,
     ) -> Session:
         """
         Create a new project session.
@@ -134,7 +139,6 @@ class Orchestrator:
         Args:
             name: Project name
             description: Project description
-            run_architect: Whether to immediately run the architect agent
             
         Returns:
             The new session
@@ -150,19 +154,18 @@ class Orchestrator:
         session: Session | None = None,
         session_id: str | None = None,
         task_type: TaskType | None = None,
-        allow_chaining: bool = True,
-        max_chain_depth: int = 3,
     ) -> AgentResponse:
         """
         Run a single agent interaction.
+        
+        This executes one agent based on the classified task type.
+        For multi-agent workflows, use run_pipeline() instead.
         
         Args:
             user_input: The user's request
             session: Session to use (creates new if not provided)
             session_id: Session ID to load (alternative to session)
             task_type: Override automatic task classification
-            allow_chaining: Whether to follow suggested_next_agent
-            max_chain_depth: Maximum number of chained agent calls
             
         Returns:
             The agent's response
@@ -181,7 +184,7 @@ class Orchestrator:
         
         # Classify request if not provided
         if task_type is None:
-            task_type = self.router.classify_request(user_input, session)
+            task_type = await self.router.classify_request(user_input, session)
         
         logger.info(f"Classified request as: {task_type.value}")
         
@@ -211,38 +214,6 @@ class Orchestrator:
             agent_name=response.agent_name,
             metadata={"artifacts": response.artifacts},
         )
-        
-        # Handle chaining
-        if (
-            allow_chaining
-            and response.suggested_next_agent
-            and max_chain_depth > 0
-            and response.suggested_task
-        ):
-            logger.info(f"Chaining to {response.suggested_next_agent}: {response.suggested_task}")
-            
-            # Find the task type for the suggested agent
-            next_task_type = self._infer_task_type_for_agent(
-                response.suggested_next_agent, 
-                response.suggested_task,
-                session
-            )
-            
-            if next_task_type:
-                chain_response = await self.run(
-                    response.suggested_task,
-                    session=session,
-                    task_type=next_task_type,
-                    allow_chaining=True,
-                    max_chain_depth=max_chain_depth - 1,
-                )
-                # Combine responses
-                response = AgentResponse(
-                    content=f"{response.content}\n\n---\n\n**{chain_response.agent_name}:**\n{chain_response.content}",
-                    agent_name=response.agent_name,
-                    model=response.model,
-                    artifacts={**response.artifacts, **chain_response.artifacts},
-                )
         
         # Save session
         self.session_manager.save(session)
@@ -312,25 +283,6 @@ class Orchestrator:
         
         return history
     
-    def _infer_task_type_for_agent(
-        self,
-        agent_name: str,
-        task_description: str,
-        session: Session,
-    ) -> TaskType | None:
-        """Infer the task type for a given agent and task description."""
-        # Map agent names to their primary task types
-        agent_primary_tasks = {
-            "architect": TaskType.ARCHITECTURE,
-            "designer": TaskType.MECHANIC_DESIGN,
-            "developer_2d": TaskType.IMPLEMENT_FEATURE_2D,
-            "developer_3d": TaskType.IMPLEMENT_FEATURE_3D,
-            "art_director": TaskType.VISUAL_STYLE,
-            "qa": TaskType.REVIEW,
-        }
-        
-        return agent_primary_tasks.get(agent_name)
-    
     async def run_pipeline(
         self,
         pipeline: Pipeline,
@@ -340,6 +292,9 @@ class Orchestrator:
     ) -> PipelineResult:
         """
         Execute a multi-agent pipeline.
+        
+        Pipelines define explicit multi-step workflows where output
+        from one agent becomes input to the next.
         
         Args:
             pipeline: The pipeline to execute

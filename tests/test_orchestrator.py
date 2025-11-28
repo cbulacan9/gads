@@ -155,31 +155,31 @@ class TestOrchestratorRun:
     """Tests for agent execution."""
     
     @pytest.mark.asyncio
-    async def test_run_classifies_request(self, config_dir, settings):
-        """Test that run() classifies requests correctly."""
+    async def test_run_with_explicit_task_type(self, config_dir, settings):
+        """Test run() with explicit task type (bypasses LLM classification)."""
         orchestrator = Orchestrator(settings=settings, config_dir=config_dir)
         session = orchestrator.new_project("Test Game")
         
-        # Mock the agent execution
         mock_response = AgentResponse(
-            content="Game concept response",
-            agent_name="architect",
+            content="Designer response",
+            agent_name="designer",
             model="llama3.1:8b",
         )
         
         with patch.object(
-            orchestrator.agents["architect"],
+            orchestrator.agents["designer"],
             "execute",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
             response = await orchestrator.run(
-                "I want to create a game about space exploration",
+                "Design a jump mechanic",
                 session=session,
+                task_type=TaskType.MECHANIC_DESIGN,
             )
         
-        assert response.agent_name == "architect"
-        assert response.content == "Game concept response"
+        assert response.agent_name == "designer"
+        assert response.content == "Designer response"
     
     @pytest.mark.asyncio
     async def test_run_records_history(self, config_dir, settings):
@@ -199,7 +199,11 @@ class TestOrchestratorRun:
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
-            await orchestrator.run("Test input", session=session)
+            await orchestrator.run(
+                "Test input",
+                session=session,
+                task_type=TaskType.GAME_CONCEPT,
+            )
         
         # Should have 2 messages: human input and agent response
         assert len(session.history) == 2
@@ -207,32 +211,6 @@ class TestOrchestratorRun:
         assert session.history[0].content == "Test input"
         assert session.history[1].role == "agent"
         assert session.history[1].agent_name == "architect"
-    
-    @pytest.mark.asyncio
-    async def test_run_with_explicit_task_type(self, config_dir, settings):
-        """Test run() with explicit task type override."""
-        orchestrator = Orchestrator(settings=settings, config_dir=config_dir)
-        session = orchestrator.new_project("Test Game")
-        
-        mock_response = AgentResponse(
-            content="Designer response",
-            agent_name="designer",
-            model="llama3.1:8b",
-        )
-        
-        with patch.object(
-            orchestrator.agents["designer"],
-            "execute",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ):
-            response = await orchestrator.run(
-                "Some input",
-                session=session,
-                task_type=TaskType.MECHANIC_DESIGN,
-            )
-        
-        assert response.agent_name == "designer"
     
     @pytest.mark.asyncio
     async def test_run_approval_rejected(self, config_dir, settings):
@@ -257,6 +235,38 @@ class TestOrchestratorRun:
         
         assert response.agent_name == "system"
         assert "cancelled" in response.content.lower()
+    
+    @pytest.mark.asyncio
+    async def test_run_with_llm_classification(self, config_dir, settings):
+        """Test run() uses LLM classification when task_type not provided."""
+        orchestrator = Orchestrator(settings=settings, config_dir=config_dir)
+        session = orchestrator.new_project("Test Game")
+        
+        mock_response = AgentResponse(
+            content="Architect response",
+            agent_name="architect",
+            model="llama3.1:8b",
+        )
+        
+        # Mock the router's classify_request to return a specific task type
+        with patch.object(
+            orchestrator.router,
+            "classify_request",
+            new_callable=AsyncMock,
+            return_value=TaskType.GAME_CONCEPT,
+        ), patch.object(
+            orchestrator.agents["architect"],
+            "execute",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            response = await orchestrator.run(
+                "I want to make a game about space",
+                session=session,
+            )
+        
+        assert response.agent_name == "architect"
+        orchestrator.router.classify_request.assert_called_once()
 
 
 class TestOrchestratorPipeline:
@@ -335,3 +345,55 @@ class TestOrchestratorPipeline:
         
         assert result.status == PipelineStatus.FAILED
         assert "Agent error" in result.error
+    
+    @pytest.mark.asyncio
+    async def test_run_pipeline_passes_context_between_steps(self, config_dir, settings):
+        """Test that pipeline passes output from one step as input to next."""
+        orchestrator = Orchestrator(settings=settings, config_dir=config_dir)
+        session = orchestrator.new_project("Test Game")
+        
+        pipeline = (
+            Pipeline("test", "Test pipeline")
+            .add_step("design", "mechanic_design", output_key="design_doc")
+            .add_step("implement", "implement_feature_2d", input_key="design_doc", output_key="code")
+        )
+        
+        mock_design_response = AgentResponse(
+            content="Jump mechanic design: player presses space to jump",
+            agent_name="designer",
+            model="llama3.1:8b",
+        )
+        mock_implement_response = AgentResponse(
+            content="extends CharacterBody2D\n\nfunc _process(delta):\n    if Input.is_action_pressed('jump'):\n        jump()",
+            agent_name="developer_2d",
+            model="llama3.1:8b",
+        )
+        
+        captured_inputs = []
+        
+        async def capture_designer_input(user_input, context, history):
+            captured_inputs.append(("designer", user_input))
+            return mock_design_response
+        
+        async def capture_developer_input(user_input, context, history):
+            captured_inputs.append(("developer_2d", user_input))
+            return mock_implement_response
+        
+        with patch.object(
+            orchestrator.agents["designer"],
+            "execute",
+            side_effect=capture_designer_input,
+        ), patch.object(
+            orchestrator.agents["developer_2d"],
+            "execute",
+            side_effect=capture_developer_input,
+        ):
+            result = await orchestrator.run_pipeline(
+                pipeline,
+                session=session,
+                initial_input="Create a jump mechanic",
+            )
+        
+        assert result.status == PipelineStatus.COMPLETED
+        # Developer should receive the designer's output as input
+        assert captured_inputs[1][1] == "Jump mechanic design: player presses space to jump"
