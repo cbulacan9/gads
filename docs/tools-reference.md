@@ -443,3 +443,129 @@ BLENDER_PATH=/path/to/blender
 - Rescan filesystem in Godot (right-click → Rescan)
 - Check model is in `assets/models/`
 - GLB files auto-import on project open
+
+---
+
+## Hyper3D Rodin AI (Experimental)
+
+Generate 3D models from text prompts or images using AI.
+
+### Requirements
+
+- Blender MCP addon installed and running
+- Hyper3D Rodin enabled in addon settings
+- Hyper3D API key (or fal.ai account)
+
+### Setup
+
+1. Open Blender
+2. Press `N` to show the sidebar in 3D Viewport
+3. Find the **BlenderMCP** panel
+4. Check **"Use Hyper3D Rodin 3D model generation"**
+5. Enter your Hyper3D API key
+6. Connect Claude to the MCP server
+
+### Generation Methods
+
+| Method | Description |
+|--------|-------------|
+| Text-to-3D | Generate from text description |
+| Image-to-3D | Generate from reference images |
+
+### Available Modes
+
+| Mode | Description |
+|------|-------------|
+| MAIN_SITE | Direct Hyper3D API (requires API key) |
+| FAL_AI | Via fal.ai service (alternative) |
+
+### Usage via CLI
+
+```bash
+# Check if Rodin is enabled
+gads blender rodin check
+
+# Show info about Rodin
+gads blender rodin info
+```
+
+### Usage via Claude
+
+Once enabled, ask Claude to generate models:
+
+```
+"Generate a 3D model of a medieval sword"
+"Create a low-poly tree model"
+"Make a 3D character from this image" (with uploaded image)
+```
+
+### Bbox Condition
+
+Control model proportions with `bbox_condition` [Length, Width, Height]:
+
+```python
+[1, 1, 2]  # Tall object (2x height)
+[2, 1, 1]  # Long object (2x length)
+[1, 1, 1]  # Default proportions
+```
+
+### Python API
+
+```python
+from gads.tools import Hyper3DRodinTool
+
+# Initialize with MCP caller (when running in Claude)
+tool = Hyper3DRodinTool(mcp_caller=my_mcp_caller)
+
+# Check status
+status = await tool.check_status()
+print(f"Enabled: {status['enabled']}")
+
+# Generate from text
+result = await tool.generate_from_text(
+    prompt="a treasure chest with gold coins",
+    bbox_condition=[1, 1, 0.8]  # Slightly flat
+)
+
+# Poll until complete
+while True:
+    status = await tool.poll_job_status(
+        subscription_key=result.subscription_key
+    )
+    if status.completed:
+        break
+    await asyncio.sleep(5)
+
+# Import the model
+await tool.import_model(
+    name="treasure_chest",
+    task_uuid=result.task_uuid
+)
+```
+
+### Generation from Images
+
+```python
+# From local images (MAIN_SITE mode)
+result = await tool.generate_from_images(
+    image_paths=["/path/to/reference.png"]
+)
+
+# From URLs (FAL_AI mode)
+result = await tool.generate_from_images(
+    image_urls=["https://example.com/reference.png"]
+)
+```
+
+### Troubleshooting
+
+**"Hyper3D Rodin integration is disabled"**
+- Enable it in Blender's BlenderMCP panel
+
+**"MCP caller not configured"**
+- Hyper3D requires Claude's MCP connection to Blender
+- Use Claude to generate models, not the CLI directly
+
+**Generation takes too long**
+- AI model generation typically takes 30-120 seconds
+- Complex prompts may take longer
