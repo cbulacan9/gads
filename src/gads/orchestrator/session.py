@@ -37,6 +37,10 @@ class ProjectState(BaseModel):
     godot_version: str = "4.2"
     project_path: Path | None = None
     
+    # Project-level settings (set once at creation)
+    project_type: str = "2d"  # "2d" or "3d"
+    art_style: str = ""       # e.g., "pixel-art", "low-poly", "realistic"
+    
     # Design documents
     game_design_doc: dict[str, Any] = Field(default_factory=dict)
     technical_spec: dict[str, Any] = Field(default_factory=dict)
@@ -139,9 +143,27 @@ class SessionManager:
         """Get the current active session."""
         return self._current_session
     
-    def create_session(self, project_name: str, description: str = "") -> Session:
-        """Create a new development session."""
-        project = ProjectState(name=project_name, description=description)
+    def create_session(
+        self,
+        project_name: str,
+        description: str = "",
+        project_type: str = "2d",
+        art_style: str = "",
+    ) -> Session:
+        """Create a new development session.
+        
+        Args:
+            project_name: Name of the project
+            description: Project description
+            project_type: "2d" or "3d" (default: "2d")
+            art_style: Art style hint (e.g., "pixel-art", "low-poly")
+        """
+        project = ProjectState(
+            name=project_name,
+            description=description,
+            project_type=project_type,
+            art_style=art_style,
+        )
         session = Session(project=project)
         self._current_session = session
         self.save(session)

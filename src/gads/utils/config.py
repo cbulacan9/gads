@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Blender MCP
     blender_mcp_host: str = Field(default="localhost", description="Blender MCP host")
     blender_mcp_port: int = Field(default=9876, description="Blender MCP port")
+    blender_path: str = Field(default="blender", description="Path to Blender executable")
     
     # Godot
     godot_executable: str = Field(default="godot", description="Path to Godot executable")

@@ -1,40 +1,133 @@
 """
 Godot Tool for GADS
 
-Interface for interacting with Godot projects and the Godot editor.
+Interface for creating and managing Godot 4.x projects.
 """
 
 from __future__ import annotations
 
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Any
+from datetime import datetime
 
 
 class GodotTool:
-    """Tool for interacting with Godot projects."""
+    """Tool for creating and managing Godot 4.x projects."""
     
-    def __init__(self, godot_executable: str = "godot", projects_dir: Path | None = None):
+    # Standard Godot project folders
+    STANDARD_FOLDERS = [
+        "scenes",
+        "scripts",
+        "assets",
+        "assets/sprites",
+        "assets/audio",
+        "assets/fonts",
+        "resources",
+        "autoloads",
+    ]
+    
+    STANDARD_FOLDERS_3D = [
+        "scenes",
+        "scripts",
+        "assets",
+        "assets/models",
+        "assets/textures",
+        "assets/audio",
+        "assets/fonts",
+        "resources",
+        "autoloads",
+    ]
+    
+    def __init__(
+        self,
+        godot_executable: str = "godot",
+        projects_dir: Path | str | None = None,
+    ):
+        """
+        Initialize the Godot tool.
+        
+        Args:
+            godot_executable: Path to Godot executable
+            projects_dir: Directory to create projects in
+        """
         self.godot_executable = godot_executable
-        self.projects_dir = projects_dir or Path("./projects")
+        self.projects_dir = Path(projects_dir) if projects_dir else Path("./projects")
         self.projects_dir.mkdir(parents=True, exist_ok=True)
     
-    def create_project(self, name: str, template: str = "default") -> Path:
-        """Create a new Godot project from template."""
-        project_path = self.projects_dir / name
+    def create_project(
+        self,
+        name: str,
+        project_type: str = "2d",
+        description: str = "",
+        art_style: str = "",
+    ) -> Path:
+        """
+        Create a new Godot 4.x project with standard structure.
+        
+        Args:
+            name: Project name
+            project_type: "2d" or "3d"
+            description: Project description (for README)
+            art_style: Art style hint
+            
+        Returns:
+            Path to the created project
+        """
+        # Sanitize project name for folder
+        safe_name = self._sanitize_name(name)
+        project_path = self.projects_dir / safe_name
+        
+        # Handle existing project
+        if project_path.exists():
+            # Add timestamp to make unique
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_name = f"{safe_name}_{timestamp}"
+            project_path = self.projects_dir / safe_name
+        
         project_path.mkdir(parents=True, exist_ok=True)
         
-        # Create minimal project.godot
-        project_godot = project_path / "project.godot"
-        project_godot.write_text(self._generate_project_file(name))
+        # Create folder structure
+        folders = self.STANDARD_FOLDERS_3D if project_type == "3d" else self.STANDARD_FOLDERS
+        for folder in folders:
+            (project_path / folder).mkdir(parents=True, exist_ok=True)
+        
+        # Create project.godot
+        project_file = project_path / "project.godot"
+        project_file.write_text(self._generate_project_file(name, project_type), encoding="utf-8")
+        
+        # Create .gitignore
+        gitignore = project_path / ".gitignore"
+        gitignore.write_text(self._generate_gitignore(), encoding="utf-8")
+        
+        # Create README.md
+        readme = project_path / "README.md"
+        readme.write_text(self._generate_readme(name, description, project_type, art_style), encoding="utf-8")
+        
+        # Create main scene with camera and basic setup
+        if project_type == "3d":
+            self.create_main_scene_3d(project_path)
+        else:
+            self.create_main_scene_2d(project_path)
+        
+        # Create game manager autoload
+        self._create_game_manager(project_path)
         
         return project_path
     
-    def _generate_project_file(self, name: str) -> str:
-        """Generate a minimal project.godot file."""
+    def _sanitize_name(self, name: str) -> str:
+        """Convert project name to valid folder name."""
+        # Replace spaces with underscores, remove special chars
+        safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
+        return safe.lower().strip("_")
+    
+    def _generate_project_file(self, name: str, project_type: str = "2d") -> str:
+        """Generate a Godot 4.x project.godot file."""
+        renderer = "forward_plus" if project_type == "3d" else "gl_compatibility"
+        
         return f"""; Engine configuration file.
-; It's best edited using the editor UI and not directly,
-; since the parameters that go here are not all obvious.
+; Generated by GADS (Godot Agentic Development System)
 
 config_version=5
 
@@ -42,26 +135,537 @@ config_version=5
 
 config/name="{name}"
 config/features=PackedStringArray("4.2", "Forward Plus")
+run/main_scene="res://scenes/main.tscn"
+config/icon="res://icon.svg"
+
+[autoload]
+
+GameManager="*res://autoloads/game_manager.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+
+[input]
+
+move_left={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":65,"key_label":0,"unicode":97,"echo":false,"script":null)
+, Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194319,"key_label":0,"unicode":0,"echo":false,"script":null)
+]
+}}
+move_right={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":68,"key_label":0,"unicode":100,"echo":false,"script":null)
+, Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194321,"key_label":0,"unicode":0,"echo":false,"script":null)
+]
+}}
+move_up={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":87,"key_label":0,"unicode":119,"echo":false,"script":null)
+, Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194320,"key_label":0,"unicode":0,"echo":false,"script":null)
+]
+}}
+move_down={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":83,"key_label":0,"unicode":115,"echo":false,"script":null)
+, Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194322,"key_label":0,"unicode":0,"echo":false,"script":null)
+]
+}}
+jump={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":32,"key_label":0,"unicode":32,"echo":false,"script":null)
+]
+}}
+dash={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194325,"key_label":0,"unicode":0,"echo":false,"script":null)
+]
+}}
 
 [rendering]
 
-renderer/rendering_method="forward_plus"
+renderer/rendering_method="{renderer}"
 """
     
-    def create_scene(self, project_path: Path, scene_name: str, root_type: str = "Node2D") -> Path:
-        """Create a new scene file."""
-        scene_path = project_path / f"{scene_name}.tscn"
-        scene_content = f"""[gd_scene format=3]
+    def _generate_gitignore(self) -> str:
+        """Generate a .gitignore for Godot projects."""
+        return """# Godot 4+ specific ignores
+.godot/
 
-[node name="{scene_name}" type="{root_type}"]
+# Godot-specific ignores
+*.translation
+
+# Imported textures and samples
+.import/
+
+# Mono-specific ignores
+.mono/
+data_*/
+mono_crash.*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Exports
+*.pck
+*.exe
+*.x86_64
+*.apk
 """
-        scene_path.write_text(scene_content)
+    
+    def _generate_readme(
+        self,
+        name: str,
+        description: str,
+        project_type: str,
+        art_style: str,
+    ) -> str:
+        """Generate a README.md for the project."""
+        return f"""# {name}
+
+{description if description else "A game created with GADS (Godot Agentic Development System)."}
+
+## Project Info
+
+- **Engine:** Godot 4.2+
+- **Type:** {project_type.upper()}
+{f"- **Art Style:** {art_style}" if art_style else ""}
+- **Generated:** {datetime.now().strftime("%Y-%m-%d")}
+
+## Project Structure
+
+```
+{name}/
+├── scenes/          # Game scenes (.tscn)
+├── scripts/         # GDScript files (.gd)
+├── assets/          # Game assets
+│   ├── {"models/" if project_type == "3d" else "sprites/"}
+│   ├── {"textures/" if project_type == "3d" else ""}
+│   ├── audio/
+│   └── fonts/
+├── resources/       # Resource files (.tres)
+├── autoloads/       # Global scripts
+└── project.godot    # Project configuration
+```
+
+## Getting Started
+
+1. Open the project in Godot 4.2+
+2. Run the main scene (`scenes/main.tscn`)
+
+## Created with GADS
+
+This project was generated using the Godot Agentic Development System.
+"""
+    
+    def _create_game_manager(self, project_path: Path) -> Path:
+        """Create a basic game manager autoload."""
+        script_path = project_path / "autoloads" / "game_manager.gd"
+        script_path.write_text("""extends Node
+## Global game manager autoload.
+## Access via GameManager singleton.
+
+# Game state
+var is_paused: bool = false
+var current_level: int = 0
+
+# Signals
+signal game_started
+signal game_paused
+signal game_resumed
+signal level_changed(level: int)
+
+
+func _ready() -> void:
+    process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+func start_game() -> void:
+    is_paused = false
+    current_level = 0
+    game_started.emit()
+
+
+func pause_game() -> void:
+    is_paused = true
+    get_tree().paused = true
+    game_paused.emit()
+
+
+func resume_game() -> void:
+    is_paused = false
+    get_tree().paused = false
+    game_resumed.emit()
+
+
+func change_level(level: int) -> void:
+    current_level = level
+    level_changed.emit(level)
+
+
+func quit_game() -> void:
+    get_tree().quit()
+""", encoding="utf-8")
+        return script_path
+    
+    def create_main_scene_2d(self, project_path: Path) -> Path:
+        """
+        Create an enhanced 2D main scene with camera and basic structure.
+        
+        Includes:
+        - Camera2D with sensible defaults
+        - World node for game objects
+        - UI CanvasLayer
+        - Basic label showing project is running
+        """
+        scene_path = project_path / "scenes" / "main.tscn"
+        scene_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Note: All sub_resources must be defined BEFORE nodes that use them
+        scene_content = '''[gd_scene load_steps=3 format=3]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_ground"]
+size = Vector2(1280, 40)
+
+[sub_resource type="LabelSettings" id="LabelSettings_title"]
+font_size = 32
+
+[node name="Main" type="Node2D"]
+
+[node name="Camera2D" type="Camera2D" parent="."]
+anchor_mode = 0
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="Ground" type="StaticBody2D" parent="World"]
+position = Vector2(640, 600)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="World/Ground"]
+shape = SubResource("RectangleShape2D_ground")
+
+[node name="ColorRect" type="ColorRect" parent="World/Ground"]
+offset_left = -640.0
+offset_top = -20.0
+offset_right = 640.0
+offset_bottom = 20.0
+color = Color(0.3, 0.3, 0.35, 1)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="InfoLabel" type="Label" parent="UI"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -200.0
+offset_top = 20.0
+offset_right = 200.0
+offset_bottom = 60.0
+grow_horizontal = 2
+text = "GADS Project Running"
+horizontal_alignment = 1
+vertical_alignment = 1
+label_settings = SubResource("LabelSettings_title")
+'''
+        
+        scene_path.write_text(scene_content, encoding="utf-8")
         return scene_path
     
-    def create_script(self, project_path: Path, script_name: str, extends: str = "Node") -> Path:
-        """Create a new GDScript file."""
-        script_path = project_path / f"{script_name}.gd"
-        script_content = f"""extends {extends}
+    def create_main_scene_3d(self, project_path: Path) -> Path:
+        """
+        Create an enhanced 3D main scene with camera, lighting, and environment.
+        
+        Includes:
+        - Camera3D positioned to view the scene
+        - DirectionalLight3D for basic lighting
+        - WorldEnvironment with default sky
+        - Ground plane (CSGBox3D)
+        - UI CanvasLayer with info label
+        """
+        scene_path = project_path / "scenes" / "main.tscn"
+        scene_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Note: All sub_resources must be defined BEFORE nodes that use them
+        scene_content = '''[gd_scene load_steps=6 format=3]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+tonemap_mode = 2
+glow_enabled = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.35, 0.4, 0.35, 1)
+
+[sub_resource type="LabelSettings" id="LabelSettings_title"]
+font_size = 32
+
+[node name="Main" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 5, 10, 5)
+light_energy = 1.2
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 5, 10)
+current = true
+fov = 60.0
+
+[node name="World" type="Node3D" parent="."]
+
+[node name="Ground" type="CSGBox3D" parent="World"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+use_collision = true
+size = Vector3(20, 1, 20)
+material = SubResource("StandardMaterial3D_ground")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="InfoLabel" type="Label" parent="UI"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -200.0
+offset_top = 20.0
+offset_right = 200.0
+offset_bottom = 60.0
+grow_horizontal = 2
+text = "GADS 3D Project Running"
+horizontal_alignment = 1
+vertical_alignment = 1
+label_settings = SubResource("LabelSettings_title")
+'''
+        
+        scene_path.write_text(scene_content, encoding="utf-8")
+        return scene_path
+    
+    def create_player_scene_2d(
+        self,
+        project_path: Path,
+        script_path: str | None = None,
+    ) -> Path:
+        """
+        Create a basic 2D player scene with CharacterBody2D.
+        
+        Includes:
+        - CharacterBody2D root
+        - CollisionShape2D
+        - Sprite2D placeholder
+        """
+        scene_dir = project_path / "scenes"
+        scene_dir.mkdir(parents=True, exist_ok=True)
+        scene_path = scene_dir / "player.tscn"
+        
+        if script_path:
+            scene_content = f"""[gd_scene load_steps=3 format=3 uid="uid://player2d"]
+
+[ext_resource type="Script" path="{script_path}" id="1_script"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_player"]
+size = Vector2(32, 48)
+
+[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_player"]
+size = Vector2(32, 48)
+
+[node name="Player" type="CharacterBody2D"]
+script = ExtResource("1_script")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_player")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = SubResource("PlaceholderTexture2D_player")
+"""
+        else:
+            scene_content = """[gd_scene load_steps=3 format=3 uid="uid://player2d"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_player"]
+size = Vector2(32, 48)
+
+[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_player"]
+size = Vector2(32, 48)
+
+[node name="Player" type="CharacterBody2D"]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_player")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = SubResource("PlaceholderTexture2D_player")
+"""
+        
+        scene_path.write_text(scene_content, encoding="utf-8")
+        return scene_path
+    
+    def create_player_scene_3d(
+        self,
+        project_path: Path,
+        script_path: str | None = None,
+    ) -> Path:
+        """
+        Create a basic 3D player scene with CharacterBody3D.
+        
+        Includes:
+        - CharacterBody3D root
+        - CollisionShape3D (capsule)
+        - MeshInstance3D placeholder (capsule mesh)
+        """
+        scene_dir = project_path / "scenes"
+        scene_dir.mkdir(parents=True, exist_ok=True)
+        scene_path = scene_dir / "player.tscn"
+        
+        if script_path:
+            scene_content = f"""[gd_scene load_steps=4 format=3 uid="uid://player3d"]
+
+[ext_resource type="Script" path="{script_path}" id="1_script"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_player"]
+albedo_color = Color(0.2, 0.6, 0.9, 1)
+
+[node name="Player" type="CharacterBody3D"]
+script = ExtResource("1_script")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("CapsuleMesh_player")
+surface_material_override/0 = SubResource("StandardMaterial3D_player")
+"""
+        else:
+            scene_content = """[gd_scene load_steps=4 format=3 uid="uid://player3d"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_player"]
+albedo_color = Color(0.2, 0.6, 0.9, 1)
+
+[node name="Player" type="CharacterBody3D"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("CapsuleMesh_player")
+surface_material_override/0 = SubResource("StandardMaterial3D_player")
+"""
+        
+        scene_path.write_text(scene_content, encoding="utf-8")
+        return scene_path
+    
+    def create_scene(
+        self,
+        project_path: Path,
+        scene_name: str,
+        root_type: str = "Node2D",
+        folder: str = "scenes",
+        script_path: str | None = None,
+    ) -> Path:
+        """
+        Create a new scene file.
+        
+        Args:
+            project_path: Path to Godot project
+            scene_name: Name of the scene
+            root_type: Type of root node (Node2D, Node3D, Control, etc.)
+            folder: Folder within project to save scene
+            script_path: Optional path to attach script
+            
+        Returns:
+            Path to created scene file
+        """
+        scene_dir = project_path / folder
+        scene_dir.mkdir(parents=True, exist_ok=True)
+        
+        scene_path = scene_dir / f"{scene_name}.tscn"
+        
+        if script_path:
+            scene_content = f"""[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="{script_path}" id="1"]
+
+[node name="{scene_name.title().replace('_', '')}" type="{root_type}"]
+script = ExtResource("1")
+"""
+        else:
+            scene_content = f"""[gd_scene format=3]
+
+[node name="{scene_name.title().replace('_', '')}" type="{root_type}"]
+"""
+        
+        scene_path.write_text(scene_content, encoding="utf-8")
+        return scene_path
+    
+    def create_script(
+        self,
+        project_path: Path,
+        script_name: str,
+        extends: str = "Node",
+        folder: str = "scripts",
+        content: str | None = None,
+    ) -> Path:
+        """
+        Create a new GDScript file.
+        
+        Args:
+            project_path: Path to Godot project
+            script_name: Name of the script (without .gd)
+            extends: Base class to extend
+            folder: Folder within project to save script
+            content: Optional full script content
+            
+        Returns:
+            Path to created script file
+        """
+        script_dir = project_path / folder
+        script_dir.mkdir(parents=True, exist_ok=True)
+        
+        script_path = script_dir / f"{script_name}.gd"
+        
+        if content:
+            script_path.write_text(content, encoding="utf-8")
+        else:
+            script_path.write_text(f"""extends {extends}
+## {script_name.replace('_', ' ').title()}
 
 
 func _ready() -> void:
@@ -70,9 +674,20 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
     pass
-"""
-        script_path.write_text(script_content)
+""", encoding="utf-8")
+        
         return script_path
+    
+    def add_icon(self, project_path: Path) -> Path:
+        """Create a default icon.svg for the project."""
+        icon_path = project_path / "icon.svg"
+        # Simple Godot-style icon
+        icon_path.write_text("""<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128">
+  <rect width="128" height="128" rx="16" fill="#478cbf"/>
+  <text x="64" y="80" font-size="48" text-anchor="middle" fill="white" font-family="sans-serif">G</text>
+</svg>
+""", encoding="utf-8")
+        return icon_path
     
     def run_project(self, project_path: Path) -> subprocess.Popen:
         """Launch the Godot project."""
@@ -83,15 +698,52 @@ func _process(delta: float) -> void:
         )
     
     def validate_project(self, project_path: Path) -> dict[str, Any]:
-        """Validate a Godot project structure."""
-        issues = []
+        """
+        Validate a Godot project structure.
         
+        Returns dict with:
+            - valid: bool
+            - issues: list of problems found
+            - path: project path
+        """
+        issues = []
+        warnings = []
+        
+        project_path = Path(project_path)
+        
+        # Check project.godot exists
         project_file = project_path / "project.godot"
         if not project_file.exists():
             issues.append("Missing project.godot file")
         
+        # Check main scene exists
+        main_scene = project_path / "scenes" / "main.tscn"
+        if not main_scene.exists():
+            warnings.append("Missing main scene (scenes/main.tscn)")
+        
+        # Check standard folders
+        for folder in ["scenes", "scripts"]:
+            if not (project_path / folder).exists():
+                warnings.append(f"Missing standard folder: {folder}/")
+        
         return {
             "valid": len(issues) == 0,
             "issues": issues,
+            "warnings": warnings,
             "path": str(project_path),
         }
+    
+    def list_projects(self) -> list[dict[str, Any]]:
+        """List all projects in the projects directory."""
+        projects = []
+        
+        for item in self.projects_dir.iterdir():
+            if item.is_dir() and (item / "project.godot").exists():
+                validation = self.validate_project(item)
+                projects.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "valid": validation["valid"],
+                })
+        
+        return projects
