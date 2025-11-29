@@ -1440,6 +1440,73 @@ def blender_create_to_project(
         raise typer.Exit(1)
 
 
+# ============================================================================
+# Hyper3D Rodin Subcommands
+# ============================================================================
+
+rodin_app = typer.Typer(
+    name="rodin",
+    help="Generate 3D models using Hyper3D Rodin AI",
+)
+blender_app.add_typer(rodin_app, name="rodin")
+
+
+@rodin_app.command("check")
+def rodin_check() -> None:
+    """Check if Hyper3D Rodin is enabled and available."""
+    console.print("\n[bold]Hyper3D Rodin Status[/]\n")
+    console.print("[dim]Hyper3D Rodin requires the Blender MCP addon running with Rodin enabled.[/]")
+    console.print("\n[yellow]Note:[/] This feature requires Claude's MCP connection to Blender.")
+    console.print("\nTo enable Hyper3D Rodin:")
+    console.print("  1. Open Blender")
+    console.print("  2. Press N to show the sidebar in 3D Viewport")
+    console.print("  3. Find the BlenderMCP panel")
+    console.print("  4. Check 'Use Hyper3D Rodin 3D model generation'")
+    console.print("  5. Enter your Hyper3D API key if required")
+    console.print("  6. Connect to Claude via the MCP server")
+    console.print("\n[dim]Once enabled, use Claude to generate models:[/]")
+    console.print('  "Generate a 3D model of a medieval sword"')
+
+
+@rodin_app.command("info")
+def rodin_info() -> None:
+    """Show information about Hyper3D Rodin integration."""
+    console.print("\n[bold]Hyper3D Rodin AI Model Generation[/]\n")
+    
+    console.print("[bold cyan]What is Hyper3D Rodin?[/]")
+    console.print("Hyper3D Rodin is an AI service that generates 3D models from text")
+    console.print("descriptions or reference images. Models are generated with textures")
+    console.print("and can be imported directly into Blender.\n")
+    
+    console.print("[bold cyan]Generation Methods[/]")
+    table = Table()
+    table.add_column("Method", style="bold")
+    table.add_column("Description")
+    table.add_row("Text-to-3D", "Generate from a text description (English)")
+    table.add_row("Image-to-3D", "Generate from one or more reference images")
+    console.print(table)
+    
+    console.print("\n[bold cyan]Available Modes[/]")
+    table2 = Table()
+    table2.add_column("Mode", style="bold")
+    table2.add_column("Description")
+    table2.add_row("MAIN_SITE", "Direct Hyper3D API (requires API key)")
+    table2.add_row("FAL_AI", "Via fal.ai service (alternative backend)")
+    console.print(table2)
+    
+    console.print("\n[bold cyan]Usage with Claude[/]")
+    console.print("Once enabled, ask Claude to generate models:")
+    console.print('  "Create a 3D model of a treasure chest"')
+    console.print('  "Generate a low-poly tree model"')
+    console.print('  "Make a 3D character from this image" (with uploaded image)')
+    
+    console.print("\n[bold cyan]Bbox Condition[/]")
+    console.print("Control model proportions with bbox_condition [Length, Width, Height]:")
+    console.print("  [1, 1, 2] - Tall object (2x height)")
+    console.print("  [2, 1, 1] - Long object (2x length)")
+    console.print("  [1, 1, 1] - Default proportions")
+
+
 def main() -> None:
     """Entry point for the CLI."""
     app()
