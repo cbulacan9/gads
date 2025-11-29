@@ -1,0 +1,23 @@
+# Example Custom Pipeline
+# Place .yaml files in this directory to create custom pipelines
+#
+# Available task types:
+#   Architect: game_concept, system_design, architecture, creative_direction
+#   Designer: mechanic_design, level_design, balancing
+#   Developer 2D: implement_feature_2d, create_scene_2d, write_script_2d, debug_2d
+#   Developer 3D: implement_feature_3d, create_scene_3d, write_script_3d, debug_3d
+#   Art Director: visual_style, asset_spec, prompt_engineering
+#   QA: test, validate, review
+
+name: prototype
+description: Quickly prototype a game mechanic with minimal steps
+
+steps:
+  - name: design
+    task_type: mechanic_design
+    output_key: design
+
+  - name: implement
+    task_type: implement_feature_2d
+    input_key: design
+    output_key: code
