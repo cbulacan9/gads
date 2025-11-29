@@ -132,6 +132,8 @@ class Orchestrator:
         self,
         name: str,
         description: str = "",
+        project_type: str = "2d",
+        art_style: str = "",
     ) -> Session:
         """
         Create a new project session.
@@ -139,12 +141,19 @@ class Orchestrator:
         Args:
             name: Project name
             description: Project description
+            project_type: "2d" or "3d" (default: "2d")
+            art_style: Art style hint (e.g., "pixel-art", "low-poly")
             
         Returns:
             The new session
         """
-        session = self.session_manager.create_session(name, description)
-        logger.info(f"Created new project: {name} (session: {session.id})")
+        session = self.session_manager.create_session(
+            name,
+            description,
+            project_type=project_type,
+            art_style=art_style,
+        )
+        logger.info(f"Created new project: {name} ({project_type}) (session: {session.id})")
         
         return session
     

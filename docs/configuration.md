@@ -33,10 +33,21 @@ ANTHROPIC_API_KEY=your_key_here
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=qwen2.5-coder:14b
 
-# Optional services
+# Stable Diffusion (optional)
 SD_API_URL=http://localhost:7860
+SD_API_KEY=
+
+# Blender (optional)
+BLENDER_PATH=blender
+# Windows example: BLENDER_PATH=C:\Program Files\Blender Foundation\Blender 4.2\blender.exe
+
+# Blender MCP (if using MCP addon)
 BLENDER_MCP_HOST=localhost
 BLENDER_MCP_PORT=9876
+
+# Godot
+GODOT_EXECUTABLE=godot
+GODOT_PROJECTS_DIR=./projects
 ```
 
 ## Ollama Setup
@@ -92,13 +103,43 @@ For AI-generated concept art:
    ```
 3. API available at `http://localhost:7860`
 
-## Blender MCP (Optional)
+## Blender (Optional)
 
-For 3D asset generation:
+For 3D asset generation, GADS can use Blender in two modes:
 
-1. Install the Blender MCP addon
-2. Start Blender with MCP server enabled
-3. Default port: 9876
+### Subprocess Mode (Recommended)
+
+Runs Blender in background mode to create and export models.
+
+1. Install Blender from [blender.org](https://www.blender.org/download/)
+2. Either add Blender to your PATH, or set in `.env`:
+   ```bash
+   # Windows
+   BLENDER_PATH=C:\Program Files\Blender Foundation\Blender 4.2\blender.exe
+   
+   # macOS
+   BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender
+   
+   # Linux
+   BLENDER_PATH=/usr/bin/blender
+   ```
+3. Verify with:
+   ```bash
+   gads blender check
+   ```
+
+### MCP Mode (Advanced)
+
+For interactive Blender control via MCP addon:
+
+1. Install the [Blender MCP addon](https://github.com/ahujasid/blender-mcp)
+2. Enable it in Blender Preferences > Add-ons
+3. Start the MCP server from the addon panel
+4. Configure in `.env`:
+   ```bash
+   BLENDER_MCP_HOST=localhost
+   BLENDER_MCP_PORT=9876
+   ```
 
 ## Configuration Files
 
