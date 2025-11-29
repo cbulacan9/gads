@@ -38,7 +38,7 @@ def router():
     """Create a router instance."""
     return AgentRouter(
         ollama_base_url="http://localhost:11434",
-        classifier_model="llama3.1:8b",
+        classifier_model="qwen2.5-coder:14b",
     )
 
 

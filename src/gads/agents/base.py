@@ -172,6 +172,27 @@ class BaseAgent(ABC):
                 },
             ) as response:
                 data = await response.json()
+                
+                # Handle error responses from Ollama
+                if "error" in data:
+                    error_msg = data["error"]
+                    if "not found" in error_msg.lower():
+                        raise RuntimeError(
+                            f"Ollama model '{self.config.model}' not found. "
+                            f"Run: ollama pull {self.config.model}"
+                        )
+                    raise RuntimeError(f"Ollama error: {error_msg}")
+                
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"Ollama API error: HTTP {response.status}"
+                    )
+                
+                if "message" not in data:
+                    raise RuntimeError(
+                        f"Unexpected Ollama response format: {data}"
+                    )
+                
                 return data["message"]["content"]
     
     def __repr__(self) -> str:
