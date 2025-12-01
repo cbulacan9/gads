@@ -73,23 +73,7 @@ BUILTIN_PIPELINES: dict[str, dict[str, Any]] = {
             },
         ],
     },
-    "asset": {
-        "name": "asset",
-        "description": "Create specifications and prompts for game assets",
-        "steps": [
-            {
-                "name": "spec",
-                "task_type": "asset_spec",
-                "output_key": "asset_spec",
-            },
-            {
-                "name": "prompts",
-                "task_type": "prompt_engineering",
-                "input_key": "asset_spec",
-                "output_key": "sd_prompts",
-            },
-        ],
-    },
+    # "asset" pipeline removed - was for Stable Diffusion prompts (see docs/archive/)
     "iterate": {
         "name": "iterate",
         "description": "Review and improve existing code",

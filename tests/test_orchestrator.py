@@ -45,13 +45,6 @@ developer_3d:
   temperature: 0.3
   max_tokens: 8192
 
-art_director:
-  name: "art_director"
-  provider: "ollama"
-  model: "qwen2.5-coder:14b"
-  temperature: 0.8
-  max_tokens: 4096
-
 qa:
   name: "qa"
   provider: "ollama"
@@ -96,7 +89,7 @@ class TestOrchestratorInit:
         orchestrator = Orchestrator(settings=settings, config_dir=config_dir)
         
         assert orchestrator.settings == settings
-        assert len(orchestrator.agents) == 6
+        assert len(orchestrator.agents) == 5
         assert "architect" in orchestrator.agents
         assert "developer_2d" in orchestrator.agents
         assert "developer_3d" in orchestrator.agents
@@ -105,7 +98,7 @@ class TestOrchestratorInit:
         """Test that agents are registered with the router."""
         orchestrator = Orchestrator(settings=settings, config_dir=config_dir)
         
-        assert len(orchestrator.router.agents) == 6
+        assert len(orchestrator.router.agents) == 5
         assert orchestrator.router.agents["architect"] is orchestrator.agents["architect"]
 
 

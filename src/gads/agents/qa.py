@@ -84,7 +84,7 @@ Always be thorough but constructive in feedback.
         
         messages.append({"role": "user", "content": user_input})
         
-        response_text = await self._call_llm(messages)
+        response_text, usage = await self._call_llm(messages)
         
         artifacts = self._extract_qa_artifacts(response_text)
         
@@ -93,6 +93,7 @@ Always be thorough but constructive in feedback.
             agent_name=self.name,
             model=self.config.model,
             artifacts=artifacts,
+            usage=usage,
         )
     
     def _extract_qa_artifacts(self, response: str) -> dict[str, Any]:

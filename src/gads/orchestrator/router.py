@@ -152,9 +152,10 @@ class AgentRouter:
         TaskType.WRITE_SCRIPT_3D: "developer_3d",
         TaskType.DEBUG_3D: "developer_3d",
         
-        TaskType.VISUAL_STYLE: "art_director",
-        TaskType.ASSET_SPEC: "art_director",
-        TaskType.PROMPT_ENGINEERING: "art_director",
+        # Art tasks now handled by architect (art_director removed)
+        TaskType.VISUAL_STYLE: "architect",
+        TaskType.ASSET_SPEC: "architect",
+        TaskType.PROMPT_ENGINEERING: "architect",
         
         TaskType.TEST: "qa",
         TaskType.VALIDATE: "qa",

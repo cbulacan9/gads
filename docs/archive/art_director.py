@@ -3,6 +3,13 @@ Art Director Agent for GADS
 
 Visual style, asset specifications, and prompt engineering.
 Uses Claude Opus 4.5 for creative visual direction.
+
+ARCHIVED: This agent was removed from GADS core to keep the project focused
+on Godot development automation. The Art Director was designed to work with
+Stable Diffusion and Blender tools for asset generation. Without those tools,
+its role overlaps with the Architect agent.
+
+See docs/archive/README.md for details.
 """
 
 from __future__ import annotations

@@ -35,6 +35,37 @@ class AgentConfig(BaseModel):
     base_url: str | None = None  # For Ollama
 
 
+class TokenUsage(BaseModel):
+    """Token usage statistics from an LLM call."""
+    
+    input_tokens: int = 0
+    output_tokens: int = 0
+    
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+    
+    def estimate_cost(self, model: str) -> float:
+        """Estimate cost in USD based on model pricing."""
+        # Pricing per million tokens (as of 2024)
+        pricing = {
+            # Anthropic
+            "claude-opus-4-5-20250514": {"input": 15.0, "output": 75.0},
+            "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+            "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
+            # Older Claude models
+            "claude-3-opus-20240229": {"input": 15.0, "output": 75.0},
+            "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0},
+        }
+        
+        # Default to Opus pricing for unknown models
+        rates = pricing.get(model, {"input": 15.0, "output": 75.0})
+        
+        cost = (self.input_tokens / 1_000_000 * rates["input"] +
+                self.output_tokens / 1_000_000 * rates["output"])
+        return cost
+
+
 class AgentResponse(BaseModel):
     """Response from an agent."""
     
@@ -46,7 +77,8 @@ class AgentResponse(BaseModel):
     artifacts: dict[str, Any] = Field(default_factory=dict)
     
     # Metadata
-    tokens_used: int | None = None
+    tokens_used: int | None = None  # Deprecated, use usage instead
+    usage: TokenUsage | None = None  # Detailed token usage
     thinking: str | None = None  # For agents that show reasoning
     
     # Handoff information
@@ -113,11 +145,14 @@ class BaseAgent(ABC):
         self,
         messages: list[dict[str, str]],
         **kwargs: Any,
-    ) -> str:
+    ) -> tuple[str, TokenUsage | None]:
         """
         Call the LLM with the given messages.
         
         This method handles provider-specific API calls.
+        
+        Returns:
+            Tuple of (response_text, token_usage)
         """
         if self.config.provider == ModelProvider.ANTHROPIC:
             return await self._call_anthropic(messages, **kwargs)
@@ -130,7 +165,7 @@ class BaseAgent(ABC):
         self,
         messages: list[dict[str, str]],
         **kwargs: Any,
-    ) -> str:
+    ) -> tuple[str, TokenUsage]:
         """Call Anthropic's API."""
         import anthropic
         
@@ -144,13 +179,19 @@ class BaseAgent(ABC):
             messages=messages,
         )
         
-        return response.content[0].text
+        # Extract token usage
+        usage = TokenUsage(
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+        )
+        
+        return response.content[0].text, usage
     
     async def _call_ollama(
         self,
         messages: list[dict[str, str]],
         **kwargs: Any,
-    ) -> str:
+    ) -> tuple[str, TokenUsage | None]:
         """Call Ollama's API."""
         import aiohttp
         
@@ -193,7 +234,15 @@ class BaseAgent(ABC):
                         f"Unexpected Ollama response format: {data}"
                     )
                 
-                return data["message"]["content"]
+                # Ollama returns eval_count (output) and prompt_eval_count (input)
+                usage = None
+                if "eval_count" in data or "prompt_eval_count" in data:
+                    usage = TokenUsage(
+                        input_tokens=data.get("prompt_eval_count", 0),
+                        output_tokens=data.get("eval_count", 0),
+                    )
+                
+                return data["message"]["content"], usage
     
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name!r}, model={self.config.model!r})"
