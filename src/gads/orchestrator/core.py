@@ -9,11 +9,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from ..agents import AgentFactory, AgentResponse, BaseAgent
+from ..agents import AgentFactory, AgentResponse, BaseAgent, TokenUsage
 from ..utils import Settings, load_settings, get_logger
 from .session import Session, SessionManager, Message
 from .router import AgentRouter, TaskType, RoutingDecision
 from .pipeline import Pipeline, PipelineResult, PipelineStatus
+
+
+class PipelineEvent:
+    """Events emitted during pipeline execution."""
+    
+    STEP_START = "step_start"
+    STEP_COMPLETE = "step_complete"
+    STEP_SKIPPED = "step_skipped"
+    APPROVAL_NEEDED = "approval_needed"
+    APPROVAL_GRANTED = "approval_granted"
+    APPROVAL_DENIED = "approval_denied"
+    LLM_CALL_START = "llm_call_start"
+    PIPELINE_COMPLETE = "pipeline_complete"
+    PIPELINE_FAILED = "pipeline_failed"
 
 logger = get_logger(__name__)
 
@@ -57,7 +71,8 @@ class Orchestrator:
         self.agents = self.factory.create_all_agents()
         self.router = self._create_router()
         
-        logger.info(f"Orchestrator initialized with {len(self.agents)} agents")
+        agent_names = ", ".join(self.factory.available_agents)
+        logger.info(f"Orchestrator initialized with {len(self.agents)} agents: {agent_names}")
     
     def _resolve_config_dir(self, config_dir: Path | str | None) -> Path:
         """Resolve the configuration directory."""
@@ -298,6 +313,7 @@ class Orchestrator:
         session: Session | None = None,
         initial_input: str = "",
         initial_context: dict[str, Any] | None = None,
+        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> PipelineResult:
         """
         Execute a multi-agent pipeline.
@@ -310,6 +326,9 @@ class Orchestrator:
             session: Session to use (creates new if not provided)
             initial_input: Initial user input for the first step
             initial_context: Initial context values
+            progress_callback: Optional callback for progress updates.
+                               Receives (event_type, event_data) where event_type
+                               is a PipelineEvent constant.
             
         Returns:
             PipelineResult with outputs and status
@@ -326,14 +345,25 @@ class Orchestrator:
         
         result = PipelineResult(status=PipelineStatus.RUNNING)
         
-        logger.info(f"Starting pipeline: {pipeline.name} ({len(pipeline.steps)} steps)")
+        def emit(event: str, data: dict[str, Any]) -> None:
+            """Emit a progress event if callback is registered."""
+            if progress_callback:
+                progress_callback(event, data)
         
-        for step in pipeline.steps:
+        logger.info(f"Starting pipeline: {pipeline.name} ({len(pipeline.steps)} steps)")
+        total_steps = len(pipeline.steps)
+        
+        for step_index, step in enumerate(pipeline.steps, 1):
             result.current_step = step.name
             
             # Check condition
             if not step.should_execute(context):
                 logger.debug(f"Skipping step {step.name} (condition not met)")
+                emit(PipelineEvent.STEP_SKIPPED, {
+                    "step": step.name,
+                    "step_index": step_index,
+                    "total_steps": total_steps,
+                })
                 continue
             
             logger.info(f"Executing pipeline step: {step.name}")
@@ -349,13 +379,36 @@ class Orchestrator:
                 task_type = TaskType(step.task_type)
                 decision = self.router.route(task_type, session, context)
                 
+                # Emit step start
+                emit(PipelineEvent.STEP_START, {
+                    "step": step.name,
+                    "step_index": step_index,
+                    "total_steps": total_steps,
+                    "agent": decision.agent_name,
+                    "task_type": task_type.value,
+                })
+                
                 # Check for approval
                 if decision.requires_human_approval:
+                    emit(PipelineEvent.APPROVAL_NEEDED, {
+                        "step": step.name,
+                        "agent": decision.agent_name,
+                    })
+                    
                     approval_msg = f"Pipeline step '{step.name}' requires approval. Proceed?"
                     if not self.approval_callback(approval_msg, decision):
+                        emit(PipelineEvent.APPROVAL_DENIED, {"step": step.name})
                         result.status = PipelineStatus.CANCELLED
                         result.error = f"Step '{step.name}' cancelled by user"
                         return result
+                    
+                    emit(PipelineEvent.APPROVAL_GRANTED, {"step": step.name})
+                
+                # Emit LLM call start (after any approval, right before execution)
+                emit(PipelineEvent.LLM_CALL_START, {
+                    "step": step.name,
+                    "agent": decision.agent_name,
+                })
                 
                 # Execute agent
                 response = await self._execute_agent(decision, str(step_input), session)
@@ -376,8 +429,24 @@ class Orchestrator:
                 
                 result.completed_steps.append(step.name)
                 
+                # Emit step complete with token usage
+                emit(PipelineEvent.STEP_COMPLETE, {
+                    "step": step.name,
+                    "step_index": step_index,
+                    "total_steps": total_steps,
+                    "agent": response.agent_name,
+                    "model": response.model,
+                    "usage": response.usage,
+                    "output_preview": response.content[:200] + "..." if len(response.content) > 200 else response.content,
+                })
+                
             except Exception as e:
                 logger.error(f"Pipeline step '{step.name}' failed: {e}")
+                emit(PipelineEvent.PIPELINE_FAILED, {
+                    "step": step.name,
+                    "error": str(e),
+                    "completed_steps": result.completed_steps,
+                })
                 result.status = PipelineStatus.FAILED
                 result.error = f"Step '{step.name}' failed: {str(e)}"
                 self.session_manager.save(session)
@@ -389,6 +458,11 @@ class Orchestrator:
         
         # Save session
         self.session_manager.save(session)
+        
+        emit(PipelineEvent.PIPELINE_COMPLETE, {
+            "steps_completed": len(result.completed_steps),
+            "total_steps": total_steps,
+        })
         
         logger.info(f"Pipeline '{pipeline.name}' completed successfully")
         

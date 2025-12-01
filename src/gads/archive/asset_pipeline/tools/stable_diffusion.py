@@ -1,8 +1,11 @@
 """
-Stable Diffusion Tool for GADS
+Stable Diffusion Tool (ARCHIVED)
 
 Interface for generating images via Stable Diffusion A1111 API.
 Supports txt2img generation with presets optimized for game art.
+
+NOTE: This file has been archived from the main GADS codebase.
+See archive/asset_pipeline/README.md for details.
 """
 
 from __future__ import annotations
@@ -174,21 +177,12 @@ class StableDiffusionTool:
         api_key: str | None = None,
         timeout: int = 120,
     ):
-        """
-        Initialize the Stable Diffusion tool.
-        
-        Args:
-            api_url: URL of the A1111 WebUI API
-            api_key: Optional API key for authentication
-            timeout: Request timeout in seconds
-        """
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: aiohttp.ClientSession | None = None
     
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create an aiohttp session."""
         if self._session is None or self._session.closed:
             headers = {}
             if self.api_key:
@@ -200,18 +194,11 @@ class StableDiffusionTool:
         return self._session
     
     async def close(self) -> None:
-        """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
     
     async def health_check(self) -> dict[str, Any]:
-        """
-        Check if SD API is available and get basic info.
-        
-        Returns:
-            Dict with 'available' bool and optional 'model', 'error' keys
-        """
         try:
             session = await self._get_session()
             async with session.get(f"{self.api_url}/sdapi/v1/options") as response:
@@ -227,18 +214,11 @@ class StableDiffusionTool:
                     "error": f"API returned status {response.status}",
                 }
         except aiohttp.ClientError as e:
-            return {
-                "available": False,
-                "error": f"Connection failed: {e}",
-            }
+            return {"available": False, "error": f"Connection failed: {e}"}
         except Exception as e:
-            return {
-                "available": False,
-                "error": str(e),
-            }
+            return {"available": False, "error": str(e)}
     
     async def get_models(self) -> list[dict[str, Any]]:
-        """Get list of available SD models."""
         session = await self._get_session()
         async with session.get(f"{self.api_url}/sdapi/v1/sd-models") as response:
             if response.status != 200:
@@ -246,7 +226,6 @@ class StableDiffusionTool:
             return await response.json()
     
     async def get_samplers(self) -> list[str]:
-        """Get list of available samplers."""
         session = await self._get_session()
         async with session.get(f"{self.api_url}/sdapi/v1/samplers") as response:
             if response.status != 200:
@@ -254,32 +233,13 @@ class StableDiffusionTool:
             data = await response.json()
             return [s["name"] for s in data]
     
-    def apply_preset(
-        self,
-        prompt: str,
-        preset: ArtPreset,
-        **overrides: Any,
-    ) -> GenerationConfig:
-        """
-        Create a generation config with a preset applied.
-        
-        Args:
-            prompt: Base prompt for generation
-            preset: Art style preset to apply
-            **overrides: Override any preset values
-            
-        Returns:
-            GenerationConfig with preset applied
-        """
+    def apply_preset(self, prompt: str, preset: ArtPreset, **overrides: Any) -> GenerationConfig:
         preset_config = PRESET_CONFIGS.get(preset, PRESET_CONFIGS[ArtPreset.CUSTOM])
-        
-        # Build full prompt with prefix/suffix
         full_prompt = (
             preset_config.get("prompt_prefix", "") +
             prompt +
             preset_config.get("prompt_suffix", "")
         )
-        
         config = GenerationConfig(
             prompt=full_prompt,
             negative_prompt=preset_config.get("negative_prompt", ""),
@@ -289,29 +249,12 @@ class StableDiffusionTool:
             cfg_scale=preset_config.get("cfg_scale", 7.0),
             sampler=preset_config.get("sampler", "Euler a"),
         )
-        
-        # Apply overrides
         for key, value in overrides.items():
             if hasattr(config, key):
                 setattr(config, key, value)
-        
         return config
     
-    async def generate(
-        self,
-        config: GenerationConfig,
-        retry_count: int = 2,
-    ) -> GenerationResult:
-        """
-        Generate images using txt2img.
-        
-        Args:
-            config: Generation configuration
-            retry_count: Number of retries on failure
-            
-        Returns:
-            GenerationResult with images and metadata
-        """
+    async def generate(self, config: GenerationConfig, retry_count: int = 2) -> GenerationResult:
         payload = {
             "prompt": config.prompt,
             "negative_prompt": config.negative_prompt,
@@ -323,7 +266,6 @@ class StableDiffusionTool:
             "seed": config.seed,
             "batch_size": config.batch_size,
         }
-        
         if config.clip_skip > 1:
             payload["override_settings"] = {"CLIP_stop_at_last_layers": config.clip_skip}
         
@@ -331,23 +273,13 @@ class StableDiffusionTool:
         for attempt in range(retry_count + 1):
             try:
                 session = await self._get_session()
-                async with session.post(
-                    f"{self.api_url}/sdapi/v1/txt2img",
-                    json=payload,
-                ) as response:
+                async with session.post(f"{self.api_url}/sdapi/v1/txt2img", json=payload) as response:
                     if response.status != 200:
                         error_text = await response.text()
                         last_error = f"API error {response.status}: {error_text[:200]}"
                         continue
-                    
                     data = await response.json()
-                    
-                    # Decode images
-                    images = []
-                    for img_b64 in data.get("images", []):
-                        images.append(base64.b64decode(img_b64))
-                    
-                    # Parse info
+                    images = [base64.b64decode(img_b64) for img_b64 in data.get("images", [])]
                     info = {}
                     seeds = []
                     if "info" in data:
@@ -357,71 +289,22 @@ class StableDiffusionTool:
                             seeds = info.get("all_seeds", [])
                         except json.JSONDecodeError:
                             pass
-                    
-                    return GenerationResult(
-                        success=True,
-                        images=images,
-                        seeds=seeds,
-                        prompt=config.prompt,
-                        info=info,
-                    )
-                    
+                    return GenerationResult(success=True, images=images, seeds=seeds, prompt=config.prompt, info=info)
             except aiohttp.ClientError as e:
                 last_error = f"Connection error: {e}"
             except Exception as e:
                 last_error = f"Error: {e}"
-            
             if attempt < retry_count:
-                await asyncio.sleep(1)  # Wait before retry
-        
-        return GenerationResult(
-            success=False,
-            prompt=config.prompt,
-            error=last_error,
-        )
+                await asyncio.sleep(1)
+        return GenerationResult(success=False, prompt=config.prompt, error=last_error)
     
-    async def generate_with_preset(
-        self,
-        prompt: str,
-        preset: ArtPreset = ArtPreset.CONCEPT_ART,
-        **overrides: Any,
-    ) -> GenerationResult:
-        """
-        Convenience method to generate with a preset.
-        
-        Args:
-            prompt: Base prompt for generation
-            preset: Art style preset to apply
-            **overrides: Override any preset values
-            
-        Returns:
-            GenerationResult with images and metadata
-        """
+    async def generate_with_preset(self, prompt: str, preset: ArtPreset = ArtPreset.CONCEPT_ART, **overrides: Any) -> GenerationResult:
         config = self.apply_preset(prompt, preset, **overrides)
         return await self.generate(config)
     
-    async def save_images(
-        self,
-        result: GenerationResult,
-        output_dir: Path,
-        name_prefix: str = "generated",
-        format: str = "png",
-    ) -> list[Path]:
-        """
-        Save generated images to disk.
-        
-        Args:
-            result: GenerationResult containing images
-            output_dir: Directory to save images
-            name_prefix: Prefix for filenames
-            format: Image format (png, jpg, webp)
-            
-        Returns:
-            List of saved file paths
-        """
+    async def save_images(self, result: GenerationResult, output_dir: Path, name_prefix: str = "generated", format: str = "png") -> list[Path]:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
         saved_paths = []
         for i, image_data in enumerate(result.images):
             seed = result.seeds[i] if i < len(result.seeds) else i
@@ -429,70 +312,18 @@ class StableDiffusionTool:
             filepath = output_dir / filename
             filepath.write_bytes(image_data)
             saved_paths.append(filepath)
-        
         return saved_paths
     
-    async def generate_to_godot_project(
-        self,
-        prompt: str,
-        project_path: Path,
-        preset: ArtPreset = ArtPreset.CONCEPT_ART,
-        asset_type: str = "sprites",
-        name: str = "generated",
-        **overrides: Any,
-    ) -> list[Path]:
-        """
-        Generate images and save directly to a Godot project.
-        
-        Args:
-            prompt: Base prompt for generation
-            project_path: Path to Godot project
-            preset: Art style preset to apply
-            asset_type: Type of asset (sprites, textures, concept_art, ui)
-            name: Base name for the generated files
-            **overrides: Override any preset values
-            
-        Returns:
-            List of saved file paths
-        """
-        # Determine output directory based on asset type
-        asset_dirs = {
-            "sprites": "assets/sprites",
-            "textures": "assets/textures", 
-            "concept_art": "assets/concept_art",
-            "ui": "assets/ui",
-            "models": "assets/models",  # For texture references
-        }
-        
+    async def generate_to_godot_project(self, prompt: str, project_path: Path, preset: ArtPreset = ArtPreset.CONCEPT_ART, asset_type: str = "sprites", name: str = "generated", **overrides: Any) -> list[Path]:
+        asset_dirs = {"sprites": "assets/sprites", "textures": "assets/textures", "concept_art": "assets/concept_art", "ui": "assets/ui", "models": "assets/models"}
         asset_dir = asset_dirs.get(asset_type, "assets")
         output_dir = Path(project_path) / asset_dir
-        
-        # Generate
         result = await self.generate_with_preset(prompt, preset, **overrides)
-        
         if not result.success:
             raise RuntimeError(f"Generation failed: {result.error}")
-        
-        # Save to project
         return await self.save_images(result, output_dir, name)
     
-    async def batch_generate(
-        self,
-        prompts: list[str],
-        preset: ArtPreset = ArtPreset.CONCEPT_ART,
-        **overrides: Any,
-    ) -> list[GenerationResult]:
-        """
-        Generate multiple images from a list of prompts.
-        
-        Args:
-            prompts: List of prompts to generate
-            preset: Art style preset to apply to all
-            **overrides: Override any preset values
-            
-        Returns:
-            List of GenerationResults
-        """
+    async def batch_generate(self, prompts: list[str], preset: ArtPreset = ArtPreset.CONCEPT_ART, **overrides: Any) -> list[GenerationResult]:
         results = []
         for prompt in prompts:
             result = await self.generate_with_preset(prompt, preset, **overrides)
@@ -500,7 +331,6 @@ class StableDiffusionTool:
         return results
 
 
-# Synchronous wrapper for CLI usage
 def run_sync(coro):
     """Run an async coroutine synchronously."""
     return asyncio.get_event_loop().run_until_complete(coro)

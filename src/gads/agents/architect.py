@@ -93,7 +93,7 @@ Be specific about node types, signal patterns, and resource usage.
         messages.append({"role": "user", "content": enhanced_input})
         
         # Call LLM
-        response_text = await self._call_llm(messages)
+        response_text, usage = await self._call_llm(messages)
         
         # Parse response for any structured outputs
         artifacts = self._extract_artifacts(response_text)
@@ -103,6 +103,7 @@ Be specific about node types, signal patterns, and resource usage.
             agent_name=self.name,
             model=self.config.model,
             artifacts=artifacts,
+            usage=usage,
         )
     
     def _build_project_context(self, context: dict[str, Any]) -> str:

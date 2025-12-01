@@ -23,7 +23,7 @@ Creates a complete game concept from a brief description.
 **Steps:**
 1. **Architect** → Game concept and vision
 2. **Architect** → Technical architecture for Godot
-3. **Art Director** → Visual style and aesthetic
+3. **Architect** → Visual style and aesthetic direction
 4. **Designer** → Core gameplay mechanics
 
 **Example:**
@@ -43,18 +43,6 @@ Designs, implements, and reviews a new feature.
 **Example:**
 ```bash
 gads pipeline run feature "Add a combo system for attacks"
-```
-
-### asset
-Creates specifications and prompts for game assets.
-
-**Steps:**
-1. **Art Director** → Asset specifications
-2. **Art Director** → Stable Diffusion prompts
-
-**Example:**
-```bash
-gads pipeline run asset "Forest tileset with mushrooms and fallen logs"
 ```
 
 ### iterate
@@ -127,6 +115,9 @@ steps:
 - `system_design` - System architecture
 - `architecture` - Technical structure
 - `creative_direction` - Theme and tone
+- `visual_style` - Art direction and aesthetics
+- `asset_spec` - Asset specifications
+- `prompt_engineering` - Image generation prompts
 
 **Designer Tasks:**
 - `mechanic_design` - Gameplay mechanics
@@ -144,11 +135,6 @@ steps:
 - `create_scene_3d` - Create scenes
 - `write_script_3d` - Write GDScript
 - `debug_3d` - Fix bugs
-
-**Art Director Tasks:**
-- `visual_style` - Art direction
-- `asset_spec` - Asset specifications
-- `prompt_engineering` - SD prompts
 
 **QA Tasks:**
 - `test` - Write tests
@@ -196,7 +182,7 @@ Step 2/4: architecture (architect)
 ------------------------------------------------------------
 [Architecture output here...]
 
-Step 3/4: visual_style (art_director)
+Step 3/4: visual_style (architect)
 ------------------------------------------------------------
 [Visual style output here...]
 

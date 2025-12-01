@@ -16,9 +16,10 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.prompt import Confirm
 
-from .orchestrator import Orchestrator, TaskType, RoutingDecision, PipelineRegistry, PipelineStatus
+from .orchestrator import Orchestrator, TaskType, RoutingDecision, PipelineRegistry, PipelineStatus, PipelineEvent
+from .agents import TokenUsage
 from .utils import load_settings, setup_logging, get_logger
-from .tools import GodotTool, StableDiffusionTool, BlenderMCPTool
+from .tools import GodotTool, BlenderMCPTool
 
 app = typer.Typer(
     name="gads",
@@ -53,7 +54,6 @@ AGENT_TASK_MAP = {
     "designer": TaskType.MECHANIC_DESIGN,
     "developer_2d": TaskType.IMPLEMENT_FEATURE_2D,
     "developer_3d": TaskType.IMPLEMENT_FEATURE_3D,
-    "art_director": TaskType.VISUAL_STYLE,
     "qa": TaskType.REVIEW,
 }
 
@@ -130,7 +130,7 @@ def new_project(
 def iterate(
     instruction: str = typer.Argument(..., help="What to do or change in the project"),
     session_id: str = typer.Option(None, "--session", "-s", help="Session ID to continue"),
-    agent: str = typer.Option(None, "--agent", "-a", help="Force specific agent (architect, designer, developer_2d, developer_3d, art_director, qa)"),
+    agent: str = typer.Option(None, "--agent", "-a", help="Force specific agent (architect, designer, developer_2d, developer_3d, qa)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip approval prompts"),
 ) -> None:
     """Iterate on an existing project with a natural language instruction."""
@@ -332,7 +332,6 @@ def agents() -> None:
         "designer": ("Ollama", "Game mechanics, level design, balancing"),
         "developer_2d": ("Ollama", "GDScript for 2D games, scenes, physics"),
         "developer_3d": ("Ollama", "GDScript for 3D games, cameras, lighting"),
-        "art_director": ("Claude Opus", "Visual style, asset specs, Stable Diffusion prompts"),
         "qa": ("Ollama", "Testing, validation, code review"),
     }
     
@@ -353,7 +352,7 @@ def agents() -> None:
 
 @app.command()
 def check() -> None:
-    """Check connectivity to all external services (Ollama, SD, Blender)."""
+    """Check connectivity to required services (Ollama)."""
     import aiohttp
     
     settings = load_settings()
@@ -385,57 +384,29 @@ def check() -> None:
         except Exception as e:
             return False, f"Error: {e}", []
     
-    async def check_sd() -> tuple[bool, str]:
-        """Check Stable Diffusion connectivity."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{settings.sd_api_url}/sdapi/v1/sd-models",
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return True, f"Running with {len(data)} model(s)"
-                    return False, f"API returned status {resp.status}"
-        except asyncio.TimeoutError:
-            return False, "Connection timeout"
-        except aiohttp.ClientConnectorError:
-            return False, "Cannot connect (optional)"
-        except Exception as e:
-            return False, f"Error: {e}"
-    
     async def check_blender() -> tuple[bool, str]:
-        """Check Blender MCP connectivity."""
+        """Check Blender availability."""
+        tool = BlenderMCPTool(blender_path=settings.blender_path)
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"http://{settings.blender_mcp_host}:{settings.blender_mcp_port}/health",
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    if resp.status == 200:
-                        return True, "Running"
-                    return False, f"API returned status {resp.status}"
-        except asyncio.TimeoutError:
-            return False, "Connection timeout"
-        except aiohttp.ClientConnectorError:
-            return False, "Cannot connect (optional)"
-        except Exception as e:
-            return False, f"Error: {e}"
+            result = await tool.health_check()
+            if result["available"]:
+                return True, f"Version {result.get('blender_version', 'unknown')}"
+            return False, result.get("error", "Not available")
+        finally:
+            await tool.close()
     
     async def run_checks():
         """Run all health checks."""
         ollama_ok, ollama_msg, ollama_models = await check_ollama()
-        sd_ok, sd_msg = await check_sd()
         blender_ok, blender_msg = await check_blender()
         return (
             (ollama_ok, ollama_msg, ollama_models),
-            (sd_ok, sd_msg),
             (blender_ok, blender_msg),
         )
     
     # Run checks
     with console.status("[bold cyan]Checking services...[/]", spinner="dots"):
-        ollama_result, sd_result, blender_result = asyncio.run(run_checks())
+        ollama_result, blender_result = asyncio.run(run_checks())
     
     # Display results
     table = Table(show_header=True)
@@ -457,21 +428,11 @@ def check() -> None:
         "[red]Yes[/]",
     )
     
-    # Stable Diffusion (optional)
-    sd_ok, sd_msg = sd_result
-    status_icon = "[green]✓[/]" if sd_ok else "[yellow]○[/]"
-    table.add_row(
-        "Stable Diffusion",
-        f"{status_icon} {sd_msg}",
-        "-",
-        "[dim]No[/]",
-    )
-    
-    # Blender MCP (optional)
+    # Blender (optional)
     blender_ok, blender_msg = blender_result
     status_icon = "[green]✓[/]" if blender_ok else "[yellow]○[/]"
     table.add_row(
-        "Blender MCP",
+        "Blender",
         f"{status_icon} {blender_msg}",
         "-",
         "[dim]No[/]",
@@ -506,10 +467,6 @@ def _show_artifacts(artifacts: dict) -> None:
         parts.append("architecture design")
     if artifacts.get("has_game_concept"):
         parts.append("game concept")
-    if artifacts.get("has_sd_prompts"):
-        parts.append("SD prompts")
-    if artifacts.get("has_color_palette"):
-        parts.append("color palette")
     
     if parts:
         console.print(f"\n[dim]Contains: {', '.join(parts)}[/]")
@@ -543,7 +500,7 @@ def export(
     if session_id:
         session = orchestrator.get_session(session_id)
         if session is None:
-            console.print(f"[red]\u2717 Session not found:[/] {session_id}")
+            console.print(f"[red]✗ Session not found:[/] {session_id}")
             raise typer.Exit(1)
     else:
         session = orchestrator.session_manager.current
@@ -552,7 +509,7 @@ def export(
             if sessions:
                 session = orchestrator.get_session(sessions[0]["id"])
             else:
-                console.print("[red]\u2717 No sessions found.[/]")
+                console.print("[red]✗ No sessions found.[/]")
                 console.print("Create a project first with [bold]gads new-project[/]")
                 raise typer.Exit(1)
     
@@ -576,7 +533,7 @@ def export(
                 art_style=session.project.art_style,
             )
         
-        console.print(f"[green]\u2713[/] Project created: {project_path}")
+        console.print(f"[green]✓[/] Project created: {project_path}")
         
         # Extract and save scripts from session history
         scripts_saved = 0
@@ -599,21 +556,21 @@ def export(
                     scripts_saved += 1
         
         if scripts_saved > 0:
-            console.print(f"[green]\u2713[/] Saved {scripts_saved} script(s) to scripts/")
+            console.print(f"[green]✓[/] Saved {scripts_saved} script(s) to scripts/")
         
         # Add icon
         tool.add_icon(project_path)
-        console.print(f"[green]\u2713[/] Added project icon")
+        console.print(f"[green]✓[/] Added project icon")
         
         # Validate
         validation = tool.validate_project(project_path)
         if validation["valid"]:
-            console.print(f"[green]\u2713[/] Project validation passed")
+            console.print(f"[green]✓[/] Project validation passed")
         else:
-            console.print(f"[yellow]\u26a0[/] Validation warnings: {validation['warnings']}")
+            console.print(f"[yellow]⚠[/] Validation warnings: {validation['warnings']}")
         
         # Summary
-        console.print(f"\n[bold green]\u2713 Export complete![/]")
+        console.print(f"\n[bold green]✓ Export complete![/]")
         console.print(f"\n[dim]Project location:[/]")
         console.print(f"  {project_path}")
         console.print(f"\n[dim]To open in Godot:[/]")
@@ -626,7 +583,7 @@ def export(
         
     except Exception as e:
         logger.exception("Export failed")
-        console.print(f"\n[red]\u2717 Export failed:[/] {e}")
+        console.print(f"\n[red]✗ Export failed:[/] {e}")
         raise typer.Exit(1)
 
 
@@ -751,343 +708,153 @@ def pipeline_run(
     console.print(f"[dim]Steps:[/] {len(pipeline.steps)}")
     console.print()
     
-    # Run the pipeline
-    try:
-        with console.status(f"[bold cyan]Running pipeline...[/]", spinner="dots"):
-            result = asyncio.run(
-                orchestrator.run_pipeline(
-                    pipeline,
-                    session=session,
-                    initial_input=prompt,
+    # Track totals for summary
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cost = 0.0
+    step_outputs: dict[str, str] = {}
+    current_spinner = None
+    
+    def handle_progress(event: str, data: dict) -> None:
+        """Handle progress events from pipeline execution."""
+        nonlocal total_input_tokens, total_output_tokens, total_cost, current_spinner
+        
+        if event == PipelineEvent.STEP_START:
+            # Stop any existing spinner before printing
+            if current_spinner:
+                current_spinner.stop()
+                current_spinner = None
+            
+            step_num = data["step_index"]
+            total = data["total_steps"]
+            step_name = data["step"]
+            agent = data["agent"]
+            
+            console.print(f"\n[bold cyan]Step {step_num}/{total}:[/] {step_name} [dim]({agent})[/]")
+            # Don't start spinner here - wait for LLM_CALL_START
+            
+        elif event == PipelineEvent.LLM_CALL_START:
+            # Start spinner right before LLM call
+            current_spinner = console.status("  [dim]→ Calling LLM...[/]", spinner="dots")
+            current_spinner.start()
+            
+        elif event == PipelineEvent.STEP_COMPLETE:
+            # Stop spinner before output
+            if current_spinner:
+                current_spinner.stop()
+                current_spinner = None
+            
+            usage: TokenUsage | None = data.get("usage")
+            model = data.get("model", "unknown")
+            step_name = data["step"]
+            
+            if usage:
+                cost = usage.estimate_cost(model)
+                total_input_tokens += usage.input_tokens
+                total_output_tokens += usage.output_tokens
+                total_cost += cost
+                
+                console.print(
+                    f"  [green]✓[/] Complete "
+                    f"[dim]({usage.input_tokens:,} in / {usage.output_tokens:,} out, ${cost:.4f})[/]"
                 )
-            )
-        
-        # Display results
-        console.print(f"\n{'=' * 60}")
-        console.print(f"[bold]Pipeline: {pipeline.name}[/]")
-        console.print(f"{'=' * 60}\n")
-        
-        # Show each step's output
-        for i, step in enumerate(pipeline.steps, 1):
-            step_name = step.name
-            output_key = step.output_key
-            
-            console.print(f"[bold]Step {i}/{len(pipeline.steps)}: {step_name}[/]")
-            console.print("-" * 60)
-            
-            if output_key and output_key in result.outputs:
-                output = result.outputs[output_key]
-                console.print(Panel(
-                    Markdown(str(output)),
-                    border_style="cyan",
-                ))
             else:
-                console.print("[dim]No output captured[/]")
+                console.print(f"  [green]✓[/] Complete")
             
-            console.print()
+            # Store output for final display
+            if data.get("output_preview"):
+                step_outputs[step_name] = data["output_preview"]
+                
+        elif event == PipelineEvent.STEP_SKIPPED:
+            # Stop spinner if running
+            if current_spinner:
+                current_spinner.stop()
+                current_spinner = None
+            console.print(f"  [yellow]○[/] Skipped: {data['step']} (condition not met)")
+            
+        elif event == PipelineEvent.APPROVAL_NEEDED:
+            # Stop spinner BEFORE prompting for approval
+            if current_spinner:
+                current_spinner.stop()
+                current_spinner = None
+            console.print(f"  [yellow]⚠ Approval required for {data['step']}[/]")
+            
+        elif event == PipelineEvent.APPROVAL_GRANTED:
+            console.print(f"  [green]✓[/] Approved")
+            # Spinner will be started by LLM_CALL_START event
+            
+        elif event == PipelineEvent.APPROVAL_DENIED:
+            console.print(f"  [red]✗[/] Denied")
+            
+        elif event == PipelineEvent.PIPELINE_FAILED:
+            if current_spinner:
+                current_spinner.stop()
+                current_spinner = None
+            console.print(f"\n  [red]✗ Failed at {data['step']}:[/] {data['error']}")
+            if data.get("completed_steps"):
+                console.print(f"  [dim]Completed before failure: {', '.join(data['completed_steps'])}[/]")
+    
+    # Run the pipeline with progress callback
+    try:
+        result = asyncio.run(
+            orchestrator.run_pipeline(
+                pipeline,
+                session=session,
+                initial_input=prompt,
+                progress_callback=handle_progress,
+            )
+        )
+        
+        # Ensure spinner is stopped
+        if current_spinner:
+            current_spinner.stop()
         
         # Summary
-        console.print(f"{'=' * 60}")
+        console.print(f"\n{'=' * 60}")
+        
         if result.status == PipelineStatus.COMPLETED:
-            console.print(f"[green]✓ Pipeline completed successfully ({len(result.completed_steps)}/{len(pipeline.steps)} steps)[/]")
+            console.print(f"[green]✓ Pipeline completed successfully[/]")
+            console.print(f"  Steps: {len(result.completed_steps)}/{len(pipeline.steps)}")
+            if total_cost > 0:
+                console.print(
+                    f"  Tokens: {total_input_tokens:,} in / {total_output_tokens:,} out"
+                )
+                console.print(f"  Estimated cost: ${total_cost:.4f}")
         elif result.status == PipelineStatus.CANCELLED:
-            console.print(f"[yellow]○ Pipeline cancelled: {result.error}[/]")
+            console.print(f"[yellow]○ Pipeline cancelled[/]")
+            console.print(f"  Reason: {result.error}")
+            if result.completed_steps:
+                console.print(f"  Completed: {', '.join(result.completed_steps)}")
         else:
-            console.print(f"[red]✗ Pipeline failed: {result.error}[/]")
+            console.print(f"[red]✗ Pipeline failed[/]")
+            console.print(f"  Error: {result.error}")
+            if result.completed_steps:
+                console.print(f"  Completed: {', '.join(result.completed_steps)}")
             raise typer.Exit(1)
+        
         console.print(f"{'=' * 60}")
+        
+        # Show outputs on request or verbose mode
+        if step_outputs:
+            console.print(f"\n[dim]Tip: Use[/] gads status [dim]to see full outputs[/]")
         
     except typer.Exit:
         raise
     except Exception as e:
         logger.exception("Pipeline execution failed")
+        if current_spinner:
+            current_spinner.stop()
         console.print(f"\n[red]✗ Error:[/] {e}")
         raise typer.Exit(1)
 
 
 # ============================================================================
-# Art Generation Subcommands
-# ============================================================================
-
-art_app = typer.Typer(
-    name="art",
-    help="Generate art assets using Stable Diffusion",
-)
-app.add_typer(art_app, name="art")
-
-
-@art_app.command("check")
-def art_check() -> None:
-    """Check Stable Diffusion API connectivity."""
-    from .tools.stable_diffusion import StableDiffusionTool
-    
-    settings = load_settings()
-    tool = StableDiffusionTool(api_url=settings.sd_api_url)
-    
-    console.print("\n[bold]Stable Diffusion API Check[/]\n")
-    
-    async def run_check():
-        try:
-            result = await tool.health_check()
-            
-            if result["available"]:
-                console.print(f"[green]\u2713 Connected to:[/] {result['api_url']}")
-                console.print(f"[dim]Current model:[/] {result.get('model', 'unknown')}")
-                
-                # Get models and samplers
-                try:
-                    models = await tool.get_models()
-                    samplers = await tool.get_samplers()
-                    console.print(f"[dim]Available models:[/] {len(models)}")
-                    console.print(f"[dim]Available samplers:[/] {len(samplers)}")
-                except Exception:
-                    pass
-                
-                console.print("\n[green]\u2713 Ready to generate art![/]")
-                return True
-            else:
-                console.print(f"[red]\u2717 Cannot connect:[/] {result.get('error', 'Unknown error')}")
-                console.print(f"\n[dim]Make sure Stable Diffusion WebUI is running with --api flag:[/]")
-                console.print(f"  ./webui.sh --api")
-                console.print(f"  (or webui-user.bat --api on Windows)")
-                return False
-        finally:
-            await tool.close()
-    
-    success = asyncio.run(run_check())
-    if not success:
-        raise typer.Exit(1)
-
-
-@art_app.command("presets")
-def art_presets() -> None:
-    """List available art generation presets."""
-    from .tools.stable_diffusion import ArtPreset, PRESET_CONFIGS
-    
-    console.print("\n[bold]Available Art Presets[/]\n")
-    
-    table = Table()
-    table.add_column("Preset", style="bold cyan")
-    table.add_column("Size")
-    table.add_column("Steps")
-    table.add_column("Best For")
-    
-    preset_descriptions = {
-        ArtPreset.PIXEL_ART: "Retro pixel art sprites and tiles",
-        ArtPreset.LOW_POLY: "Low-poly 3D style renders",
-        ArtPreset.CONCEPT_ART: "Detailed concept art and illustrations",
-        ArtPreset.UI_ICON: "Simple game UI icons",
-        ArtPreset.SPRITE: "2D game character sprites",
-        ArtPreset.TEXTURE: "Seamless tileable textures",
-        ArtPreset.CHARACTER: "Character design sheets",
-        ArtPreset.ENVIRONMENT: "Environment and background art",
-        ArtPreset.CUSTOM: "Custom settings (no modifications)",
-    }
-    
-    for preset in ArtPreset:
-        config = PRESET_CONFIGS.get(preset, {})
-        size = f"{config.get('width', 512)}x{config.get('height', 512)}"
-        steps = str(config.get('steps', 20))
-        desc = preset_descriptions.get(preset, "")
-        table.add_row(preset.value, size, steps, desc)
-    
-    console.print(table)
-    console.print("\n[dim]Use presets with:[/] gads art generate --preset <name> \"your prompt\"")
-
-
-@art_app.command("generate")
-def art_generate(
-    prompt: str = typer.Argument(..., help="Description of the image to generate"),
-    preset: str = typer.Option("concept_art", "--preset", "-p", help="Art style preset"),
-    output: str = typer.Option(None, "--output", "-o", help="Output directory (default: ./generated)"),
-    name: str = typer.Option("image", "--name", "-n", help="Base name for output files"),
-    width: int = typer.Option(None, "--width", "-W", help="Override width"),
-    height: int = typer.Option(None, "--height", "-H", help="Override height"),
-    steps: int = typer.Option(None, "--steps", help="Override sampling steps"),
-    seed: int = typer.Option(-1, "--seed", help="Random seed (-1 for random)"),
-    batch: int = typer.Option(1, "--batch", "-b", help="Number of images to generate"),
-    negative: str = typer.Option(None, "--negative", help="Additional negative prompt"),
-) -> None:
-    """Generate an image using Stable Diffusion."""
-    from .tools.stable_diffusion import StableDiffusionTool, ArtPreset
-    
-    logger = get_logger(__name__)
-    settings = load_settings()
-    
-    # Validate preset
-    try:
-        art_preset = ArtPreset(preset)
-    except ValueError:
-        console.print(f"[red]\u2717 Unknown preset:[/] {preset}")
-        console.print(f"[dim]Available presets:[/] {', '.join(p.value for p in ArtPreset)}")
-        raise typer.Exit(1)
-    
-    tool = StableDiffusionTool(api_url=settings.sd_api_url)
-    
-    # Build overrides
-    overrides = {"batch_size": batch, "seed": seed}
-    if width:
-        overrides["width"] = width
-    if height:
-        overrides["height"] = height
-    if steps:
-        overrides["steps"] = steps
-    
-    # Build config
-    config = tool.apply_preset(prompt, art_preset, **overrides)
-    
-    # Add extra negative prompt if provided
-    if negative:
-        config.negative_prompt = f"{config.negative_prompt}, {negative}"
-    
-    console.print(f"\n[bold]Generating Art[/]\n")
-    console.print(f"[dim]Preset:[/] {preset}")
-    console.print(f"[dim]Size:[/] {config.width}x{config.height}")
-    console.print(f"[dim]Steps:[/] {config.steps}")
-    console.print(f"[dim]Batch:[/] {batch}")
-    console.print(f"\n[dim]Prompt:[/] {config.prompt[:100]}{'...' if len(config.prompt) > 100 else ''}")
-    console.print()
-    
-    async def run_generation():
-        try:
-            result = await tool.generate(config)
-            
-            if not result.success:
-                console.print(f"[red]\u2717 Generation failed:[/] {result.error}")
-                return None
-            
-            # Save images
-            output_dir = Path(output) if output else Path("./generated")
-            saved_paths = await tool.save_images(result, output_dir, name)
-            
-            return result, saved_paths
-        finally:
-            await tool.close()
-    
-    try:
-        with console.status("[bold cyan]Generating...[/]", spinner="dots"):
-            gen_result = asyncio.run(run_generation())
-        
-        if gen_result is None:
-            raise typer.Exit(1)
-        
-        result, saved_paths = gen_result
-        
-        console.print(f"[green]\u2713 Generated {len(saved_paths)} image(s)![/]\n")
-        
-        for path in saved_paths:
-            console.print(f"  [dim]Saved:[/] {path}")
-        
-        if result.seeds:
-            console.print(f"\n[dim]Seeds:[/] {', '.join(str(s) for s in result.seeds)}")
-        
-    except typer.Exit:
-        raise
-    except Exception as e:
-        logger.exception("Art generation failed")
-        console.print(f"\n[red]\u2717 Error:[/] {e}")
-        raise typer.Exit(1)
-
-
-@art_app.command("to-project")
-def art_to_project(
-    prompt: str = typer.Argument(..., help="Description of the image to generate"),
-    preset: str = typer.Option("concept_art", "--preset", help="Art style preset"),
-    asset_type: str = typer.Option("sprites", "--type", "-t", help="Asset type (sprites, textures, concept_art, ui)"),
-    name: str = typer.Option("asset", "--name", "-n", help="Base name for output files"),
-    session_id: str = typer.Option(None, "--session", "-s", help="Session ID to get project from"),
-    project_path: str = typer.Option(None, "--project", "-p", help="Direct path to Godot project"),
-    batch: int = typer.Option(1, "--batch", "-b", help="Number of images to generate"),
-) -> None:
-    """Generate art and save directly to a Godot project."""
-    from .tools.stable_diffusion import StableDiffusionTool, ArtPreset
-    
-    logger = get_logger(__name__)
-    settings = load_settings()
-    
-    # Validate preset
-    try:
-        art_preset = ArtPreset(preset)
-    except ValueError:
-        console.print(f"[red]\u2717 Unknown preset:[/] {preset}")
-        raise typer.Exit(1)
-    
-    # Determine project path
-    godot_project = None
-    if project_path:
-        godot_project = Path(project_path)
-        if not (godot_project / "project.godot").exists():
-            console.print(f"[red]\u2717 Not a valid Godot project:[/] {project_path}")
-            raise typer.Exit(1)
-    else:
-        # Get from session
-        orchestrator = get_orchestrator()
-        session = None
-        if session_id:
-            session = orchestrator.get_session(session_id)
-        else:
-            session = orchestrator.session_manager.current
-            if session is None:
-                sessions = orchestrator.list_sessions()
-                if sessions:
-                    session = orchestrator.get_session(sessions[0]["id"])
-        
-        if session is None:
-            console.print("[red]\u2717 No session found.[/]")
-            console.print("[dim]Use --project to specify a Godot project path directly[/]")
-            raise typer.Exit(1)
-        
-        # Look for exported project
-        safe_name = session.project.name.lower().replace(" ", "_")
-        godot_project = Path(settings.godot_projects_dir) / safe_name
-        
-        if not godot_project.exists():
-            console.print(f"[yellow]Project not exported yet. Run:[/] gads export")
-            raise typer.Exit(1)
-    
-    console.print(f"\n[bold]Generating Art to Project[/]\n")
-    console.print(f"[dim]Project:[/] {godot_project}")
-    console.print(f"[dim]Asset type:[/] {asset_type}")
-    console.print(f"[dim]Preset:[/] {preset}")
-    console.print()
-    
-    tool = StableDiffusionTool(api_url=settings.sd_api_url)
-    
-    async def run_generation():
-        try:
-            saved_paths = await tool.generate_to_godot_project(
-                prompt=prompt,
-                project_path=godot_project,
-                preset=art_preset,
-                asset_type=asset_type,
-                name=name,
-                batch_size=batch,
-            )
-            return saved_paths
-        finally:
-            await tool.close()
-    
-    try:
-        with console.status("[bold cyan]Generating and saving...[/]", spinner="dots"):
-            saved_paths = asyncio.run(run_generation())
-        
-        console.print(f"[green]\u2713 Generated {len(saved_paths)} asset(s)![/]\n")
-        for path in saved_paths:
-            console.print(f"  [dim]Saved:[/] {path}")
-        
-    except Exception as e:
-        logger.exception("Art generation failed")
-        console.print(f"\n[red]\u2717 Error:[/] {e}")
-        raise typer.Exit(1)
-
-
-# ============================================================================
-# Blender MCP Subcommands
+# Blender Subcommands (simplified - primitives only)
 # ============================================================================
 
 blender_app = typer.Typer(
     name="blender",
-    help="Interact with Blender via MCP for 3D asset creation",
+    help="Create placeholder 3D assets using Blender",
 )
 app.add_typer(blender_app, name="blender")
 
@@ -1095,8 +862,6 @@ app.add_typer(blender_app, name="blender")
 @blender_app.command("check")
 def blender_check() -> None:
     """Check Blender availability."""
-    from .tools.blender_mcp import BlenderMCPTool
-    
     settings = load_settings()
     tool = BlenderMCPTool(blender_path=settings.blender_path)
     
@@ -1112,56 +877,16 @@ def blender_check() -> None:
     result = asyncio.run(run_check())
     
     if result["available"]:
-        console.print(f"[green]\u2713 Blender found[/]")
+        console.print(f"[green]✓ Blender found[/]")
         console.print(f"[dim]Version:[/] {result.get('blender_version', 'unknown')}")
         console.print(f"[dim]Mode:[/] {result.get('mode', 'subprocess')}")
-        console.print("\n[green]\u2713 Ready to create 3D assets![/]")
+        console.print("\n[green]✓ Ready to create placeholder assets![/]")
     else:
-        console.print(f"[red]\u2717 Cannot connect:[/] {result.get('error', 'Unknown error')}")
+        console.print(f"[red]✗ Cannot find Blender:[/] {result.get('error', 'Unknown error')}")
         console.print(f"\n[dim]Make sure Blender is installed and in your PATH:[/]")
         console.print(f"  1. Install Blender from https://www.blender.org/download/")
         console.print(f"  2. Add Blender to your system PATH")
-        console.print(f"  3. Or specify the path in .env: GODOT_EXECUTABLE=blender")
-        raise typer.Exit(1)
-
-
-@blender_app.command("scene")
-def blender_scene(
-    blend_file: str = typer.Option(None, "--file", "-f", help="Path to .blend file to inspect"),
-) -> None:
-    """Show Blender scene info (from file or default scene)."""
-    from .tools.blender_mcp import BlenderMCPTool
-    
-    settings = load_settings()
-    tool = BlenderMCPTool(blender_path=settings.blender_path)
-    
-    async def run_scene_info():
-        try:
-            scene = await tool.get_scene_info()
-            return scene
-        finally:
-            await tool.close()
-    
-    try:
-        scene = asyncio.run(run_scene_info())
-        
-        console.print("\n[bold]Blender Scene Info[/]\n")
-        console.print(f"[dim]Scene name:[/] {scene.name}")
-        console.print(f"[dim]Object count:[/] {scene.object_count}")
-        console.print(f"[dim]Materials:[/] {scene.materials_count}")
-        
-        if scene.objects:
-            console.print(f"\n[bold]Objects:[/]")
-            for obj in scene.objects[:20]:
-                loc = obj.get('location', [0,0,0])
-                console.print(f"  - {obj['name']} ({obj['type']}) at ({loc[0]:.1f}, {loc[1]:.1f}, {loc[2]:.1f})")
-            if len(scene.objects) > 20:
-                console.print(f"  ... and {len(scene.objects) - 20} more")
-        else:
-            console.print("\n[dim]No objects in scene[/]")
-            
-    except Exception as e:
-        console.print(f"\n[red]\u2717 Error:[/] {e}")
+        console.print(f"  3. Or set BLENDER_PATH in .env")
         raise typer.Exit(1)
 
 
@@ -1173,15 +898,12 @@ def blender_create(
     scale: float = typer.Option(1.0, "--scale", "-s", help="Uniform scale"),
 ) -> None:
     """Create a primitive mesh and optionally export to GLB."""
-    from .tools.blender_mcp import BlenderMCPTool
-    
     settings = load_settings()
     tool = BlenderMCPTool(blender_path=settings.blender_path)
     
     async def run_create():
         try:
             if output:
-                # Create and export in one step
                 return await tool.create_and_export_primitive(
                     primitive_type=primitive,
                     output_path=output,
@@ -1189,7 +911,6 @@ def blender_create(
                     scale=(scale, scale, scale),
                 )
             else:
-                # Just create (for inspection)
                 obj_name = await tool.create_primitive(
                     primitive_type=primitive,
                     name=name,
@@ -1204,17 +925,17 @@ def blender_create(
             result = asyncio.run(run_create())
         
         if output:
-            console.print(f"[green]\u2713 Created and exported:[/] {result}")
+            console.print(f"[green]✓ Created and exported:[/] {result}")
         else:
-            console.print(f"[green]\u2713 Created:[/] {result}")
+            console.print(f"[green]✓ Created:[/] {result}")
             console.print(f"[dim]Scale:[/] {scale}")
             console.print(f"\n[dim]Use --output to export to GLB[/]")
         
     except ValueError as e:
-        console.print(f"[red]\u2717 Error:[/] {e}")
+        console.print(f"[red]✗ Error:[/] {e}")
         raise typer.Exit(1)
     except Exception as e:
-        console.print(f"\n[red]\u2717 Error:[/] {e}")
+        console.print(f"\n[red]✗ Error:[/] {e}")
         raise typer.Exit(1)
 
 
@@ -1225,8 +946,6 @@ def blender_export(
     format: str = typer.Option("glb", "--format", help="Export format (glb, gltf, fbx, obj)"),
 ) -> None:
     """Export a .blend file to GLB/FBX/OBJ."""
-    from .tools.blender_mcp import BlenderMCPTool
-    
     settings = load_settings()
     tool = BlenderMCPTool(blender_path=settings.blender_path)
     
@@ -1248,23 +967,22 @@ def blender_export(
         with console.status("[bold cyan]Exporting...[/]", spinner="dots"):
             output_path = asyncio.run(run_export())
         
-        console.print(f"[green]\u2713 Exported to:[/] {output_path}")
+        console.print(f"[green]✓ Exported to:[/] {output_path}")
         
     except Exception as e:
-        console.print(f"\n[red]\u2717 Error:[/] {e}")
+        console.print(f"\n[red]✗ Error:[/] {e}")
         raise typer.Exit(1)
 
 
 @blender_app.command("to-project")
 def blender_to_project(
-    name: str = typer.Argument("model", help="Name for the exported model"),
-    blend_file: str = typer.Option(None, "--file", "-f", help="Path to .blend file to export"),
-    session_id: str = typer.Option(None, "--session", "-s", help="Session ID to get project from"),
-    project_path: str = typer.Option(None, "--project", help="Direct path to Godot project"),
+    primitive: str = typer.Argument(..., help="Primitive type (cube, sphere, cylinder, plane, cone, torus, monkey)"),
+    name: str = typer.Option("placeholder", "--name", "-n", help="Name for the model file"),
+    scale: float = typer.Option(1.0, "--scale", "-s", help="Uniform scale"),
+    project_path: str = typer.Option(None, "--project", "-p", help="Path to Godot project"),
+    session_id: str = typer.Option(None, "--session", help="Session ID to get project from"),
 ) -> None:
-    """Export a .blend file directly to a Godot project."""
-    from .tools.blender_mcp import BlenderMCPTool
-    
+    """Create a primitive and export directly to a Godot project."""
     logger = get_logger(__name__)
     settings = load_settings()
     
@@ -1273,7 +991,7 @@ def blender_to_project(
     if project_path:
         godot_project = Path(project_path)
         if not (godot_project / "project.godot").exists():
-            console.print(f"[red]\u2717 Not a valid Godot project:[/] {project_path}")
+            console.print(f"[red]✗ Not a valid Godot project:[/] {project_path}")
             raise typer.Exit(1)
     else:
         # Get from session
@@ -1289,7 +1007,7 @@ def blender_to_project(
                     session = orchestrator.get_session(sessions[0]["id"])
         
         if session is None:
-            console.print("[red]\u2717 No session found.[/]")
+            console.print("[red]✗ No session found.[/]")
             console.print("[dim]Use --project to specify a Godot project path directly[/]")
             raise typer.Exit(1)
         
@@ -1301,108 +1019,8 @@ def blender_to_project(
             console.print(f"[yellow]Project not exported yet. Run:[/] gads export")
             raise typer.Exit(1)
     
-    tool = BlenderMCPTool(blender_path=settings.blender_path)
-    
-    async def run_export():
-        try:
-            return await tool.export_to_godot_project(
-                project_path=godot_project,
-                filename=name,
-                blend_file=blend_file,
-            )
-        finally:
-            await tool.close()
-    
-    try:
-        console.print(f"\n[bold]Exporting to Godot Project[/]\n")
-        console.print(f"[dim]Project:[/] {godot_project}")
-        console.print(f"[dim]Model name:[/] {name}")
-        if blend_file:
-            console.print(f"[dim]Source:[/] {blend_file}")
-        console.print()
-        
-        with console.status("[bold cyan]Exporting...[/]", spinner="dots"):
-            output_path = asyncio.run(run_export())
-        
-        console.print(f"[green]\u2713 Exported to:[/] {output_path}")
-        console.print(f"\n[dim]The model will be auto-imported when you open the project in Godot.[/]")
-        
-    except Exception as e:
-        logger.exception("Blender export failed")
-        console.print(f"\n[red]\u2717 Error:[/] {e}")
-        raise typer.Exit(1)
-
-
-@blender_app.command("clear")
-def blender_clear() -> None:
-    """Show info about clearing scenes (use Blender directly)."""
-    console.print("\n[bold]Blender Clear Scene[/]\n")
-    console.print("[dim]The GADS CLI uses Blender in batch/background mode.")
-    console.print("To clear a scene, open your .blend file in Blender and clear it there.")
-    console.print("\nAlternatively, use the 'create' command which starts fresh:[/]")
-    console.print("  gads blender create cube --output my_model.glb")
-
-
-@blender_app.command("create-to-project")
-def blender_create_to_project(
-    primitive: str = typer.Argument(..., help="Primitive type (cube, sphere, cylinder, plane, cone, torus, monkey)"),
-    name: str = typer.Option(None, "--name", "-n", help="Name for the model file"),
-    scale: float = typer.Option(1.0, "--scale", "-s", help="Uniform scale"),
-    session_id: str = typer.Option(None, "--session", help="Session ID to get project from"),
-    project_path: str = typer.Option(None, "--project", "-p", help="Direct path to Godot project"),
-) -> None:
-    """Create a primitive and export directly to a Godot project."""
-    from .tools.blender_mcp import BlenderMCPTool
-    
-    logger = get_logger(__name__)
-    settings = load_settings()
-    
-    # Determine project path
-    godot_project = None
-    if project_path:
-        godot_project = Path(project_path)
-        if not (godot_project / "project.godot").exists():
-            console.print(f"[red]\u2717 Not a valid Godot project:[/] {project_path}")
-            raise typer.Exit(1)
-    else:
-        # Get from session
-        orchestrator = get_orchestrator()
-        session = None
-        if session_id:
-            session = orchestrator.get_session(session_id)
-        else:
-            session = orchestrator.session_manager.current
-            if session is None:
-                sessions = orchestrator.list_sessions()
-                if sessions:
-                    session = orchestrator.get_session(sessions[0]["id"])
-        
-        if session is None:
-            console.print("[red]\u2717 No session found.[/]")
-            console.print("[dim]Use --project to specify a Godot project path directly[/]")
-            raise typer.Exit(1)
-        
-        # Look for exported project
-        safe_name = session.project.name.lower().replace(" ", "_")
-        godot_project = Path(settings.godot_projects_dir) / safe_name
-        
-        if not godot_project.exists():
-            # Try to find the most recent export
-            projects_dir = Path(settings.godot_projects_dir)
-            if projects_dir.exists():
-                matches = list(projects_dir.glob(f"{safe_name}*"))
-                if matches:
-                    godot_project = max(matches, key=lambda p: p.stat().st_mtime)
-                else:
-                    console.print(f"[yellow]Project not exported yet. Run:[/] gads export")
-                    raise typer.Exit(1)
-            else:
-                console.print(f"[yellow]Project not exported yet. Run:[/] gads export")
-                raise typer.Exit(1)
-    
     # Determine output path
-    model_name = name or primitive
-    output_path = godot_project / "assets" / "models" / f"{model_name}.glb"
+    output_path = godot_project / "assets" / "models" / f"{name}.glb"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     tool = BlenderMCPTool(blender_path=settings.blender_path)
@@ -1412,7 +1030,7 @@ def blender_create_to_project(
             return await tool.create_and_export_primitive(
                 primitive_type=primitive,
                 output_path=output_path,
-                name=model_name,
+                name=name,
                 scale=(scale, scale, scale),
             )
         finally:
@@ -1421,90 +1039,23 @@ def blender_create_to_project(
     try:
         console.print(f"\n[bold]Creating {primitive} for Godot Project[/]\n")
         console.print(f"[dim]Project:[/] {godot_project}")
-        console.print(f"[dim]Model:[/] {model_name}.glb")
+        console.print(f"[dim]Model:[/] {name}.glb")
         console.print(f"[dim]Scale:[/] {scale}")
         console.print()
         
         with console.status("[bold cyan]Creating and exporting...[/]", spinner="dots"):
             result_path = asyncio.run(run_create())
         
-        console.print(f"[green]\u2713 Created:[/] {result_path}")
+        console.print(f"[green]✓ Created:[/] {result_path}")
         console.print(f"\n[dim]The model will be auto-imported when you open the project in Godot.[/]")
         
     except ValueError as e:
-        console.print(f"[red]\u2717 Error:[/] {e}")
+        console.print(f"[red]✗ Error:[/] {e}")
         raise typer.Exit(1)
     except Exception as e:
         logger.exception("Blender create failed")
-        console.print(f"\n[red]\u2717 Error:[/] {e}")
+        console.print(f"\n[red]✗ Error:[/] {e}")
         raise typer.Exit(1)
-
-
-# ============================================================================
-# Hyper3D Rodin Subcommands
-# ============================================================================
-
-rodin_app = typer.Typer(
-    name="rodin",
-    help="Generate 3D models using Hyper3D Rodin AI",
-)
-blender_app.add_typer(rodin_app, name="rodin")
-
-
-@rodin_app.command("check")
-def rodin_check() -> None:
-    """Check if Hyper3D Rodin is enabled and available."""
-    console.print("\n[bold]Hyper3D Rodin Status[/]\n")
-    console.print("[dim]Hyper3D Rodin requires the Blender MCP addon running with Rodin enabled.[/]")
-    console.print("\n[yellow]Note:[/] This feature requires Claude's MCP connection to Blender.")
-    console.print("\nTo enable Hyper3D Rodin:")
-    console.print("  1. Open Blender")
-    console.print("  2. Press N to show the sidebar in 3D Viewport")
-    console.print("  3. Find the BlenderMCP panel")
-    console.print("  4. Check 'Use Hyper3D Rodin 3D model generation'")
-    console.print("  5. Enter your Hyper3D API key if required")
-    console.print("  6. Connect to Claude via the MCP server")
-    console.print("\n[dim]Once enabled, use Claude to generate models:[/]")
-    console.print('  "Generate a 3D model of a medieval sword"')
-
-
-@rodin_app.command("info")
-def rodin_info() -> None:
-    """Show information about Hyper3D Rodin integration."""
-    console.print("\n[bold]Hyper3D Rodin AI Model Generation[/]\n")
-    
-    console.print("[bold cyan]What is Hyper3D Rodin?[/]")
-    console.print("Hyper3D Rodin is an AI service that generates 3D models from text")
-    console.print("descriptions or reference images. Models are generated with textures")
-    console.print("and can be imported directly into Blender.\n")
-    
-    console.print("[bold cyan]Generation Methods[/]")
-    table = Table()
-    table.add_column("Method", style="bold")
-    table.add_column("Description")
-    table.add_row("Text-to-3D", "Generate from a text description (English)")
-    table.add_row("Image-to-3D", "Generate from one or more reference images")
-    console.print(table)
-    
-    console.print("\n[bold cyan]Available Modes[/]")
-    table2 = Table()
-    table2.add_column("Mode", style="bold")
-    table2.add_column("Description")
-    table2.add_row("MAIN_SITE", "Direct Hyper3D API (requires API key)")
-    table2.add_row("FAL_AI", "Via fal.ai service (alternative backend)")
-    console.print(table2)
-    
-    console.print("\n[bold cyan]Usage with Claude[/]")
-    console.print("Once enabled, ask Claude to generate models:")
-    console.print('  "Create a 3D model of a treasure chest"')
-    console.print('  "Generate a low-poly tree model"')
-    console.print('  "Make a 3D character from this image" (with uploaded image)')
-    
-    console.print("\n[bold cyan]Bbox Condition[/]")
-    console.print("Control model proportions with bbox_condition [Length, Width, Height]:")
-    console.print("  [1, 1, 2] - Tall object (2x height)")
-    console.print("  [2, 1, 1] - Long object (2x length)")
-    console.print("  [1, 1, 1] - Default proportions")
 
 
 def main() -> None:

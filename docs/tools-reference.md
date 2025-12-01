@@ -1,16 +1,18 @@
 # GADS Tools Reference
 
-This document describes the external tools integrated with GADS for game asset creation.
+This document describes the external tools integrated with GADS for game development.
 
 ## Overview
 
-GADS integrates with three external tools:
+GADS integrates with external tools to support game project creation:
 
 | Tool | Purpose | Required |
 |------|---------|----------|
 | **GodotTool** | Project creation and export | Built-in |
-| **StableDiffusionTool** | 2D art generation | Optional |
-| **BlenderMCPTool** | 3D model creation | Optional |
+| **BlenderMCPTool** | Placeholder 3D asset creation | Optional |
+
+> **Note:** Stable Diffusion and Hyper3D Rodin integrations have been archived.
+> See `docs/archive/` if you need AI-powered asset generation.
 
 ---
 
@@ -113,151 +115,9 @@ print(f"Valid: {result['valid']}")
 
 ---
 
-## StableDiffusionTool
-
-Generates 2D art using Stable Diffusion (AUTOMATIC1111 WebUI API).
-
-### Requirements
-
-- AUTOMATIC1111 Stable Diffusion WebUI
-- Running with `--api` flag
-- Default URL: `http://localhost:7860`
-
-### Installation
-
-```bash
-# Clone A1111 WebUI
-git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui
-cd stable-diffusion-webui
-
-# Launch with API
-./webui.sh --api
-# Or on Windows:
-webui-user.bat --api
-```
-
-### Art Presets
-
-Presets optimize generation settings for different game art types:
-
-| Preset | Resolution | Steps | CFG | Use Case |
-|--------|------------|-------|-----|----------|
-| `pixel_art` | 512x512 | 25 | 8.0 | Retro sprites, tiles |
-| `low_poly` | 768x768 | 25 | 7.5 | 3D-style renders |
-| `concept_art` | 1024x768 | 30 | 7.0 | Illustrations |
-| `ui_icon` | 256x256 | 20 | 8.0 | Interface icons |
-| `sprite` | 512x512 | 25 | 7.5 | Character sprites |
-| `texture` | 512x512 | 25 | 7.0 | Tileable textures |
-| `character` | 768x1024 | 30 | 7.0 | Character sheets |
-| `environment` | 1024x576 | 30 | 7.0 | Backgrounds |
-| `custom` | 512x512 | 20 | 7.0 | No modifications |
-
-Each preset includes optimized:
-- **Prompt prefix/suffix** - Style-specific keywords
-- **Negative prompt** - Quality and style exclusions
-- **Sampler** - Best sampler for the style
-- **Resolution** - Optimal dimensions
-
-### Usage via CLI
-
-```bash
-# Check connectivity
-gads art check
-
-# List presets
-gads art presets
-
-# Generate art
-gads art generate "fantasy sword" --preset pixel_art --name sword
-
-# Generate to project
-gads art to-project "player sprite" --preset sprite -p ./my_project
-```
-
-### Usage via Python
-
-```python
-import asyncio
-from gads.tools.stable_diffusion import StableDiffusionTool, ArtPreset
-
-async def generate_art():
-    tool = StableDiffusionTool(api_url="http://localhost:7860")
-    
-    try:
-        # Check connection
-        status = await tool.health_check()
-        print(f"Connected: {status['available']}")
-        
-        # Generate with preset
-        result = await tool.generate_with_preset(
-            prompt="a magical staff, game item",
-            preset=ArtPreset.PIXEL_ART,
-            seed=12345
-        )
-        
-        if result.success:
-            # Save images
-            paths = await tool.save_images(
-                result,
-                output_dir="./generated",
-                name_prefix="staff"
-            )
-            print(f"Saved: {paths}")
-        else:
-            print(f"Error: {result.error}")
-            
-    finally:
-        await tool.close()
-
-asyncio.run(generate_art())
-```
-
-### Advanced Configuration
-
-```python
-from gads.tools.stable_diffusion import GenerationConfig
-
-# Full control over generation
-config = GenerationConfig(
-    prompt="detailed fantasy castle, digital art",
-    negative_prompt="blurry, low quality, watermark",
-    width=1024,
-    height=768,
-    steps=30,
-    cfg_scale=7.0,
-    sampler="DPM++ 2M Karras",
-    seed=42,
-    batch_size=4
-)
-
-result = await tool.generate(config)
-```
-
-### Batch Generation
-
-```python
-# Generate multiple prompts
-prompts = [
-    "red potion bottle",
-    "blue mana flask",
-    "green health elixir"
-]
-
-results = await tool.batch_generate(
-    prompts,
-    preset=ArtPreset.UI_ICON
-)
-
-for result in results:
-    if result.success:
-        await tool.save_images(result, "./icons", result.prompt[:20])
-```
-
----
-
 ## BlenderMCPTool
 
-Creates 3D models using Blender in batch/subprocess mode.
+Creates placeholder 3D geometry using Blender in subprocess mode.
 
 ### Requirements
 
@@ -309,7 +169,7 @@ gads blender create cube --output model.glb
 gads blender create sphere --output ball.glb --scale 2.0
 
 # Create directly to project
-gads blender create-to-project monkey --name enemy -p ./my_project
+gads blender to-project monkey --name enemy -p ./my_project
 
 # Export .blend file
 gads blender export output.glb --file model.blend
@@ -373,18 +233,6 @@ await tool.export_fbx(
 
 ## Integration with Agents
 
-### Art Director Agent
-
-The Art Director agent can generate Stable Diffusion prompts that work with the presets:
-
-```bash
-# Ask Art Director for prompts
-gads iterate "Create concept art prompts for a forest tileset" --agent art_director
-
-# Use the prompts with SD
-gads art generate "<prompt from art director>" --preset texture
-```
-
 ### Developer Agents
 
 Developer agents generate GDScript that references assets:
@@ -400,22 +248,6 @@ gads export
 ---
 
 ## Troubleshooting
-
-### Stable Diffusion
-
-**"Cannot connect" error:**
-```bash
-# Ensure WebUI is running with --api
-./webui.sh --api
-```
-
-**"API returned 404":**
-- API not enabled. Restart with `--api` flag.
-
-**Slow generation:**
-- Check GPU is being used
-- Reduce steps or resolution
-- Use smaller model
 
 ### Blender
 
@@ -443,129 +275,3 @@ BLENDER_PATH=/path/to/blender
 - Rescan filesystem in Godot (right-click → Rescan)
 - Check model is in `assets/models/`
 - GLB files auto-import on project open
-
----
-
-## Hyper3D Rodin AI (Experimental)
-
-Generate 3D models from text prompts or images using AI.
-
-### Requirements
-
-- Blender MCP addon installed and running
-- Hyper3D Rodin enabled in addon settings
-- Hyper3D API key (or fal.ai account)
-
-### Setup
-
-1. Open Blender
-2. Press `N` to show the sidebar in 3D Viewport
-3. Find the **BlenderMCP** panel
-4. Check **"Use Hyper3D Rodin 3D model generation"**
-5. Enter your Hyper3D API key
-6. Connect Claude to the MCP server
-
-### Generation Methods
-
-| Method | Description |
-|--------|-------------|
-| Text-to-3D | Generate from text description |
-| Image-to-3D | Generate from reference images |
-
-### Available Modes
-
-| Mode | Description |
-|------|-------------|
-| MAIN_SITE | Direct Hyper3D API (requires API key) |
-| FAL_AI | Via fal.ai service (alternative) |
-
-### Usage via CLI
-
-```bash
-# Check if Rodin is enabled
-gads blender rodin check
-
-# Show info about Rodin
-gads blender rodin info
-```
-
-### Usage via Claude
-
-Once enabled, ask Claude to generate models:
-
-```
-"Generate a 3D model of a medieval sword"
-"Create a low-poly tree model"
-"Make a 3D character from this image" (with uploaded image)
-```
-
-### Bbox Condition
-
-Control model proportions with `bbox_condition` [Length, Width, Height]:
-
-```python
-[1, 1, 2]  # Tall object (2x height)
-[2, 1, 1]  # Long object (2x length)
-[1, 1, 1]  # Default proportions
-```
-
-### Python API
-
-```python
-from gads.tools import Hyper3DRodinTool
-
-# Initialize with MCP caller (when running in Claude)
-tool = Hyper3DRodinTool(mcp_caller=my_mcp_caller)
-
-# Check status
-status = await tool.check_status()
-print(f"Enabled: {status['enabled']}")
-
-# Generate from text
-result = await tool.generate_from_text(
-    prompt="a treasure chest with gold coins",
-    bbox_condition=[1, 1, 0.8]  # Slightly flat
-)
-
-# Poll until complete
-while True:
-    status = await tool.poll_job_status(
-        subscription_key=result.subscription_key
-    )
-    if status.completed:
-        break
-    await asyncio.sleep(5)
-
-# Import the model
-await tool.import_model(
-    name="treasure_chest",
-    task_uuid=result.task_uuid
-)
-```
-
-### Generation from Images
-
-```python
-# From local images (MAIN_SITE mode)
-result = await tool.generate_from_images(
-    image_paths=["/path/to/reference.png"]
-)
-
-# From URLs (FAL_AI mode)
-result = await tool.generate_from_images(
-    image_urls=["https://example.com/reference.png"]
-)
-```
-
-### Troubleshooting
-
-**"Hyper3D Rodin integration is disabled"**
-- Enable it in Blender's BlenderMCP panel
-
-**"MCP caller not configured"**
-- Hyper3D requires Claude's MCP connection to Blender
-- Use Claude to generate models, not the CLI directly
-
-**Generation takes too long**
-- AI model generation typically takes 30-120 seconds
-- Complex prompts may take longer

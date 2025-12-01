@@ -39,14 +39,6 @@ developer_3d:
   max_tokens: 8192
   system_prompt_path: "prompts/developer_3d.md"
 
-art_director:
-  name: "art_director"
-  provider: "anthropic"
-  model: "claude-opus-4-5-20251101"
-  temperature: 0.8
-  max_tokens: 4096
-  system_prompt_path: "prompts/art_director.md"
-
 qa:
   name: "qa"
   provider: "ollama"

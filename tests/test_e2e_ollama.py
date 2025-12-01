@@ -126,13 +126,6 @@ developer_3d:
   temperature: 0.3
   max_tokens: 4096
 
-art_director:
-  name: "art_director"
-  provider: "ollama"
-  model: "{model_name}"
-  temperature: 0.8
-  max_tokens: 2048
-
 qa:
   name: "qa"
   provider: "ollama"
@@ -195,17 +188,6 @@ Your role is to write GDScript code for 3D games. Always:
 - Include comments explaining the code
 
 Provide complete, working GDScript that can be used directly in Godot.""")
-    
-    # Art Director prompt
-    (prompts_path / "art_director.md").write_text("""You are the Art Director agent for a Godot game development system.
-
-Your role is to:
-- Define visual styles and aesthetics
-- Specify asset requirements
-- Create color palettes
-- Write Stable Diffusion prompts for concept art
-
-Provide clear, actionable art direction that artists and AI tools can follow.""")
     
     # QA prompt
     (prompts_path / "qa.md").write_text("""You are the QA agent for a Godot game development system.
@@ -408,24 +390,6 @@ class TestAgentExecution:
         # Should contain GDScript code
         content = response.content
         assert "extends" in content or "func" in content
-    
-    @pytest.mark.asyncio
-    async def test_art_director_defines_style(self, orchestrator):
-        """Test Art Director agent defines visual style."""
-        session = orchestrator.new_project("Fantasy RPG")
-        
-        response = await orchestrator.run(
-            "Define the visual style for a cozy fantasy RPG with a cottage core aesthetic",
-            session=session,
-            task_type=TaskType.VISUAL_STYLE,
-        )
-        
-        assert response.agent_name == "art_director"
-        assert len(response.content) > 50
-        
-        # Should describe visual elements
-        content_lower = response.content.lower()
-        assert any(word in content_lower for word in ["color", "style", "visual", "art", "palette"])
     
     @pytest.mark.asyncio
     async def test_qa_reviews_code(self, orchestrator):
